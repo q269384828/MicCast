@@ -3,7 +3,7 @@
 把鸿蒙手机当作 Windows 电脑的麦克风。
 
 > 虚拟声卡推荐 [VB-CABLE](https://vb-audio.com/Cable/)（VB-Audio 出品，donationware，本项目不附带其安装包）。
-> 许可：[MIT](LICENSE)
+> 许可：[MIT](LICENSE)　·　后续迭代计划见 [ROADMAP.md](ROADMAP.md)
 
 ```
 鸿蒙手机（服务端）                         Windows（MicCast Receiver）
@@ -97,6 +97,9 @@ devecocli run --skip-build --module entry --device <手机IP:端口> --ability E
 ```
 MicCast/
 ├── AppScope/app.json5                    # bundleName: com.local.miccast
+├── README.md
+├── ROADMAP.md                            # 后续迭代计划
+├── LICENSE
 ├── entry/src/main/
 │   ├── ets/
 │   │   ├── model/
@@ -128,7 +131,6 @@ MicCast/
 │   │       ├── TextField.cs / StatusPill.cs / LevelMeter.cs
 │   │       └── NativeFx.cs               # Win11 圆角 + 深色标题栏
 │   ├── Set-DefaultMic.ps1                # 切换系统默认录音设备
-│   ├── vbcable/                          # VB-CABLE Pack46（本地留存）
 │   └── README.md
 └── tools/
     ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
