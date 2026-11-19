@@ -1,6 +1,6 @@
 /**
  * 极简 protobuf 编解码器。
- * 只实现 AudioRelay 用到的 wire type：0(varint) / 1(64bit) / 2(length-delimited) / 5(32bit)。
+ * 只实现本项目用到的 wire type：0(varint) / 1(64bit) / 2(length-delimited) / 5(32bit)。
  * 不依赖任何三方库，避免 ArkTS 对动态特性的限制。
  */
 export const WIRE_VARINT: number = 0;

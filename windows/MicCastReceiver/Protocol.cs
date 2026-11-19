@@ -132,7 +132,12 @@ public static class Pb
         => fields.FirstOrDefault(x => x.Number == number && x.Bytes == null)?.Varint ?? 0;
 }
 
-/// <summary>MicCast 沿用的线缆协议常量与消息构造（字段号取自官方 AudioRelay Model.dll 反射，保持互操作）</summary>
+/// <summary>
+/// 线缆协议常量与消息构造。
+/// 字段号沿用 AudioRelay 0.27.5 的 protobuf schema（从本机 Model.dll 反射核对）——
+/// 手机端与接收端都在本仓库内，沿用只是省掉重新联调的成本。
+/// 注意：官方 AudioRelay 桌面端虽然能握手，但内部不解码我们推的流，实际不可用。
+/// </summary>
 public static class Protocol
 {
     public const int ControlPort = 59100;

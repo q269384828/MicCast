@@ -35,7 +35,7 @@ export function serverStateText(state: ServerState): string {
 }
 
 /**
- * 手机作为服务端：电脑端 MicCast Receiver（或官方 AudioRelay 播放器）
+ * 手机作为服务端：电脑端 MicCast Receiver
  * 连上来后，本端把麦克风 PCM 以 StreamData 推到客户端绑定的 UDP 59100。
  */
 export class MicServer {

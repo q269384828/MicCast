@@ -15,17 +15,12 @@
 - 缺少 VB-CABLE 时顶部出现引导卡片，可**一键下载并静默安装**（下载地址见
   [vb-audio.com/Cable](https://vb-audio.com/Cable/)），也提供「打开下载页面」和「我已装好，刷新」
 
-## 为什么要有它
+## 为什么自己写接收端
 
-官方 AudioRelay 的"播放器 → 接收麦克风输入"能连上我们的手机服务端，但实测它收到合法音频后仍然：
-
-```
-[ERROR] Ignoring malformed audio packet   ← MTU 修复后已消失
-[WARN]  Queue's offer() failed            ← 内部队列溢出，始终不解码播放
-[WARN]  Timed out while reading messages  ← 每 10s 重连
-```
-
-这是闭源实现内部的问题，继续逆向性价比很低。自己写接收端可以完全掌控链路。
+现成的第三方桌面端虽然能和我们的手机端握手、也能收到音频包，
+但它的内部实现从不解码播放（日志里持续 `Queue's offer() failed`），属于闭源实现的局限。
+既然手机端的协议、推流、参数都已经完全可控，自己写一个接收端反而最简单，也能完全掌控
+缓冲策略、设备选择与错误恢复。
 
 ## 已验证
 
@@ -47,9 +42,7 @@ max_volume:  -2.5 dB
 
 - 稳定 **200 帧/秒**（5ms/帧，48kHz/16bit/2ch），**1533 kbps**
 - 缓冲区 **60~95 ms**
-- **从 `CABLE Output` 录到的不是静音**（对比：AudioRelay 自带 `Virtual Mic` 只有 -91 dB）
-
-这证明 Windows 侧拿到的是一路真实可用的麦克风输入。
+- **从 `CABLE Output` 录到的不是静音**，是真实可用的麦克风输入
 
 ## 使用前提：一个虚拟声卡
 
@@ -59,8 +52,9 @@ Windows 没有内置虚拟麦克风，需要一个"播放端 → 录音端"成�
   - 播放设备 `CABLE Input`（另有 `CABLE In 16ch`）← 本程序往这里写
   - 录音设备 `CABLE Output` ← 会议软件 / Win+H 从这里采
 
-> 实测 AudioRelay 自带的 `Virtual Speakers` 与 `Virtual Mic` **不互通**（录 `Virtual Mic` 得到 -91 dB 静音），不能替代。
-> `立体声混音` 在本机只是驱动残留，实际不可用。
+> 注意：有些 App 自带的 `Virtual Speakers` / `Virtual Mic` 之类设备彼此**并不互通**
+> （录 `Virtual Mic` 会得到 -91 dB 纯静音），不能拿来替代专用虚拟声卡。
+> `立体声混音` 在很多机器上只是驱动残留，实际不可用。
 
 ### 安装 VB-CABLE
 
@@ -100,7 +94,7 @@ pnputil /enum-drivers | Select-String vbaudio
 拿到手机地址，所以手机端不需要任何配置，也不用在界面上找自己的 IP。
 
 - 超过 **8 秒**没再收到某个设备的广播，就把它从列表里移除
-- 端口被别的程序占用时（例如官方 AudioRelay 桌面端仍在运行），界面会提示"无法监听 UDP 59200"，此时手动填 IP 照样能用
+- 端口被别的程序占用时（例如某个仍在运行的桌面端 App 占着 59200），界面会提示"无法监听 UDP 59200"，此时手动填 IP 照样能用
 - 无界面自检：
 
 ```powershell

@@ -1,4 +1,4 @@
-// PC 端客户端：模拟 AudioRelay 播放器连接手机服务端，接收麦克风音频并计算音量
+// 纯 Node 模拟客户端：连手机服务端收麦克风音频并计算音量，不依赖 Windows 端
 const net = require('net');
 const dgram = require('dgram');
 

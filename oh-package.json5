@@ -1,11 +1,11 @@
 {
   "modelVersion": "6.0.0",
-  "name": "audiorelay-mic",
+  "name": "miccast",
   "version": "1.0.0",
-  "description": "HarmonyOS client that streams the phone microphone to AudioRelay on Windows",
+  "description": "MicCast — use a HarmonyOS phone as a Windows microphone",
   "main": "",
   "author": "",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {},
   "devDependencies": {}
 }

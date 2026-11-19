@@ -2,10 +2,7 @@
 
 把鸿蒙手机当作 Windows 电脑的麦克风。
 
-> 协议部分与 [AudioRelay](https://audiorelay.net/) 0.27.5 的 protobuf schema 兼容（字段号由本机 `Model.dll` 反射核对），
-> 因此也能与官方桌面端互操作。本项目与 AudioRelay 官方无关联。
 > 虚拟声卡推荐 [VB-CABLE](https://vb-audio.com/Cable/)（VB-Audio 出品，donationware，本项目不附带其安装包）。
->
 > 许可：[MIT](LICENSE)
 
 ```
@@ -25,7 +22,9 @@
 
 - **包名**：`com.local.miccast`
 - **服务端广播名**：`<机型> (MicCast)`，例如 `P60 (MicCast)`
-- **线缆协议**：沿用 AudioRelay 0.27.5 的 protobuf schema（字段号从本机 `Model.dll` 反射核对），因此与官方桌面端仍可互操作
+- **线缆协议**：字段号沿用 AudioRelay 0.27.5 的 protobuf schema（从本机 `Model.dll` 反射核对）。
+  之所以还沿用这套格式，是因为手机端与接收端都在本仓库内、协议本身够用，
+  改动它只会带来无谓的联调成本 —— 但**官方 App 收不了我们推的流**（见下方「协议设计上踩过的三个坑」）。
 
 ## 端到端实测
 
@@ -36,7 +35,7 @@
 | 手机推流 | **200 帧/秒**（5ms/帧），`sentOk` 持续增长、`sendErr=0` |
 | 接收端收流 | `fps=200 kbps=1533 buffered=75ms device=CABLE Input (VB-Audio Virtual Cable)` |
 | **Windows 拿到真麦克风** | 从 `CABLE Output` 录 30s：`mean_volume=-33.8 dB` / `max_volume=-2.5 dB` |
-| 对比：AudioRelay 自带 Virtual Mic | −91 dB（纯静音），不可用 |
+| 对比：某些 App 自带的 Virtual Mic | −91 dB（纯静音），不可用 |
 
 真机：HarmonyOS 手机（API 26 / OpenHarmony 7.0），Windows 11 + VB-CABLE 3.5.2.0。
 
@@ -132,9 +131,8 @@ MicCast/
 │   ├── vbcable/                          # VB-CABLE Pack46（本地留存）
 │   └── README.md
 └── tools/
-    ├── player-test.js                    # 模拟播放器连手机服务端，算 RMS
-    ├── handshake-test.js                 # 对官方服务端握手验证
-    ├── stream-test.js                    # 推 StreamData 验证
+    ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
+    ├── lan-scan.js                       # 扫描局域网里的 hdc 调试端口
     └── install.ps1                       # 构建 + 装机 + 抓日志
 ```
 
@@ -148,28 +146,30 @@ MicCast/
 
 **服务端握手顺序**：TCP accept → 发 `ProtoServerConfig` → 收 `ProtoClientConfig` → 发 `ProtoFeatures` → 推流。
 
-### 踩过的三个坑（都写进代码了）
+### 协议设计上踩过的三个坑
 
-1. **帧长必须 ≤ MTU**：20ms/3840 字节 → 数据报 3856 → IP 分片 → 官方端判 `Ignoring malformed audio packet`。
-   改 5ms/960 字节（整包 ~985）后归零。
-2. **服务端必须主动心跳**：桌面端读消息超时 10s，不发就重连。每 2s 发一次 `PingRequest`。
-3. **双方各绑本地 59100**：服务端也从 UDP 59100 发出，客户端按源端口过滤。
+前两条是为对接官方桌面端时发现的，现在虽然不再用它，但约束依然成立：
+
+1. **帧长必须 ≤ MTU**：20ms/3840 字节 → 数据报 3856 → IP 分片，任一分片丢失整帧报废。
+   改 5ms/960 字节（整包 ~985 字节）后彻底避免分片。这对**任何** UDP 接收端都是收益。
+2. **双方各绑本地 59100**：服务端也从 UDP 59100 发出，接收端按源端口过滤。
+3. **服务端每 2s 发一次 `PingRequest`**：当初是因为官方桌面端读消息有 10s 超时。
+   自研接收端没有超时逻辑，这一条现在只是保留着方便测链路存活，不是硬性要求。
 
 ## 已知限制
 
-- **必须装虚拟声卡**：VB-CABLE 是必需前置。
-- **免费版时长限制在服务端**：`DisconnectClientMessage.Reason = NEED_PREMIUM_FOR_UNLIMITED_DURATION` 时会主动断开，本客户端不绕过，只在日志里显示。
-- **纯局域网**：协议无中继 / NAT 穿透，必须同一广播域。
+- **必须装虚拟声卡**：VB-CABLE 是必需前置，Windows 没有内置虚拟麦克风。
+- **纯局域网**：协议无中继 / NAT 穿透，手机与电脑必须互通（同一 Wi-Fi 或有路由的子网）。
 - **只做手机→PC**：PC→手机方向需要 Opus 解码，未实现。
-- **PCM 不压缩**：48kHz/16bit/2ch ≈ 1.5 Mbps。
+- **PCM 不压缩**：48kHz/16bit/2ch ≈ 1.5 Mbps，Wi-Fi 无压力，走移动网络会吃流量。
 - **不能开机静默常驻**：鸿蒙要求录音必须前台启动，启动后立即申请长时任务。
-- **官方桌面端不解码我们推的流**：它能握手、能收包，但内部队列始终不消费（`Queue's offer() failed`），所以本仓库自带接收端。
+- **手机端必须保持前台可见**：切后台靠 `audioRecording` 长时任务维持，被系统清理则需重新打开。
 
 ## 排错
 
 | 现象 | 处理 |
 |---|---|
-| 电脑端列表一直空 | 手机是否已点「启动麦克风服务」；两端是否同一 Wi-Fi；端口 59200 是否被官方 AudioRelay 占用 |
+| 电脑端列表一直空 | 手机是否已点「启动麦克风服务」；两端是否同一 Wi-Fi；端口 59200 是否被其他程序占用 |
 | 帧数上涨但没声音 | 接收端播放设备要选 `CABLE Input` |
 | 会议软件/ Win+H 没声音 | 麦克风选 `CABLE Output`；只认默认设备的软件跑 `Set-DefaultMic.ps1 -Name 'CABLE Output'` |
 | 手机显示「正在串流」但电脑没声 | 检查电脑端是否还活着；手机在电脑断开后会自动停采集 |

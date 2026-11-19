@@ -1,6 +1,7 @@
 /**
- * AudioRelay 官方协议消息（依据本机 0.27.5 的 Model.dll 反射出的 schema，字段号完全一致）。
- * MicCast 沿用这套线缆协议，因此仍与官方桌面端互操作。
+ * 线缆协议消息定义。字段号沿用 AudioRelay 0.27.5 的 schema（从本机 Model.dll 反射核对）。
+ * 手机端与接收端都在本仓库内，沿用这套格式只是省掉重新联调的成本；
+ * 官方 AudioRelay 桌面端能握手但不解码我们推的流，实际不可用。
  * 端口：TCP 控制 59100 / UDP 音频 59100 / UDP 发现广播 59200。
  */
 import { PbReader, PbWriter, WIRE_LEN, WIRE_VARINT } from './Pb';
@@ -20,9 +21,11 @@ export const SERVER_VERSION: string = '0.27.5';
 export const SAMPLE_RATE: number = 48000;
 export const BITS: number = 16;
 export const CHANNELS: number = 2;
-/** 5ms 一帧：48000 * 0.005 * 2ch * 2byte = 960 字节。
- *  必须让整个 UDP 数据报（含 protobuf 头）小于 MTU 1472，否则会被 IP 分片，
- *  实测官方桌面端会丢弃 3856 字节的分片大包。 */
+/**
+ * 帧长 5ms：48000 * 0.005 * 2ch * 2byte = 960 字节。
+ * 必须让整个 UDP 数据报（含 protobuf 头 ~985 字节）小于 MTU 1472，
+ * 否则会被 IP 分片，任一分片丢失整帧就废了。
+ */
 export const FRAME_BYTES: number = 960;
 export const FRAME_MS: number = 5;
 

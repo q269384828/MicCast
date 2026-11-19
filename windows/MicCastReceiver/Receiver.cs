@@ -5,7 +5,7 @@ using System.Net.Sockets;
 namespace MicCastReceiver;
 
 /// <summary>
-/// 连接手机端 AudioRelay 兼容服务端：TCP 59100 握手保活，UDP 59100 收 PCM 音频。
+/// 连接手机端服务端：TCP 59100 握手保活，UDP 59100 收 PCM 音频。
 /// </summary>
 public sealed class Receiver : IDisposable
 {
@@ -114,7 +114,7 @@ public sealed class Receiver : IDisposable
                     if (handshake == 0)
                     {
                         var fields = Pb.ReadFields(frame);
-                        ServerName = Pb.GetString(fields, 1) ?? "AudioRelay";
+                        ServerName = Pb.GetString(fields, 1) ?? "MicCast";
                         ServerVersion = Pb.GetString(fields, 2) ?? "?";
                         Emit($"服务端: {ServerName} v{ServerVersion}");
                         await SendAsync(Protocol.BuildClientConfig(), token);
