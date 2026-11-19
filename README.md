@@ -2,6 +2,12 @@
 
 把鸿蒙手机当作 Windows 电脑的麦克风。
 
+> 协议部分与 [AudioRelay](https://audiorelay.net/) 0.27.5 的 protobuf schema 兼容（字段号由本机 `Model.dll` 反射核对），
+> 因此也能与官方桌面端互操作。本项目与 AudioRelay 官方无关联。
+> 虚拟声卡推荐 [VB-CABLE](https://vb-audio.com/Cable/)（VB-Audio 出品，donationware，本项目不附带其安装包）。
+>
+> 许可：[MIT](LICENSE)
+
 ```
 鸿蒙手机（服务端）                         Windows（MicCast Receiver）
 ┌──────────────────────────┐             ┌─────────────────────────────────┐
