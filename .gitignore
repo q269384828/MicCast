@@ -1,0 +1,42 @@
+# DevEco Studio / hvigor
+/.hvigor/
+/build/
+/entry/build/
+/oh_modules/
+/entry/oh_modules/
+/oh-package-lock.json5
+/local.properties
+# hvigor-wrapper.js 由 hvigorw 首次运行时自动生成
+/hvigor/hvigor-wrapper.js
+/hvigor/hvigor-wrapper.js.sha256
+
+# 构建日志与临时文件
+build*.log
+/tools/*.log
+
+# 签名材料（千万不要入库）
+/entry/build/default/outputs/**/*.p7b
+/entry/build/default/outputs/**/*.cer
+/entry/build/default/outputs/**/*.p12
+**/*.p12
+**/*.p7b
+**/*.keystore
+**/*.jks
+
+# 含签名密码的本地构建配置；入库的 build-profile.json5 必须是模板
+/build-profile.local.json5
+
+# Windows 接收端构建产物
+/windows/**/bin/
+/windows/**/obj/
+/windows/**/last-ip.txt
+
+# VB-CABLE 驱动包属第三方软件，由程序运行时按需下载，不入库
+/windows/vbcable/
+
+# 调试产物
+*.wav
+
+# 系统
+.DS_Store
+Thumbs.db

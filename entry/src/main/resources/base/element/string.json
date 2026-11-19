@@ -1,0 +1,24 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "MicCast — 把手机麦克风串流到电脑"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "通过局域网把本机麦克风作为电脑麦克风使用"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "MicCast"
+    },
+    {
+      "name": "reason_mic",
+      "value": "采集麦克风音频并发送到电脑"
+    },
+    {
+      "name": "reason_bg",
+      "value": "锁屏或切到后台后保持麦克风串流"
+    }
+  ]
+}

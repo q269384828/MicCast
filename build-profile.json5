@@ -1,0 +1,39 @@
+{
+  app: {
+    // 签名配置不入库。首次构建前执行：
+    //   devecocli auth login --no-prompt
+    //   devecocli signature generate --type debug
+    // devecocli 会自动把 signingConfigs 写回本文件。
+    // 用 DevEco Studio 打开工程时，也可在 Project Structure → Signing Configs 里自动生成。
+    products: [
+      {
+        name: 'default',
+        compatibleSdkVersion: '26.0.0',
+        targetSdkVersion: '26.0.1',
+        runtimeOS: 'HarmonyOS',
+      },
+    ],
+    buildModeSet: [
+      {
+        name: 'debug',
+      },
+      {
+        name: 'release',
+      },
+    ],
+  },
+  modules: [
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
+        {
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+      ],
+    },
+  ],
+}

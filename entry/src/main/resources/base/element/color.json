@@ -1,0 +1,27 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#F5F7FA" },
+    { "name": "page_bg", "value": "#F2F5FA" },
+    { "name": "card_bg", "value": "#FFFFFF" },
+    { "name": "card_bg_alt", "value": "#EEF2F8" },
+    { "name": "tile_bg", "value": "#F1F5FB" },
+    { "name": "text_main", "value": "#16233A" },
+    { "name": "text_muted", "value": "#6B7A90" },
+    { "name": "accent", "value": "#2F6BFF" },
+    { "name": "on_accent", "value": "#FFFFFF" },
+    { "name": "state_ok", "value": "#12A150" },
+    { "name": "state_warn", "value": "#B86E00" },
+    { "name": "state_danger", "value": "#C42B2B" },
+    { "name": "pill_idle_bg", "value": "#E3E8F0" },
+    { "name": "pill_idle_fg", "value": "#55637A" },
+    { "name": "log_bg", "value": "#F7F9FD" },
+    { "name": "log_text", "value": "#5A6B85" },
+    { "name": "divider", "value": "#E4E9F2" },
+    { "name": "track_bg", "value": "#E3E9F4" },
+    { "name": "hero_from", "value": "#2F6BFF" },
+    { "name": "hero_to", "value": "#12A594" },
+    { "name": "on_hero", "value": "#FFFFFF" },
+    { "name": "on_hero_soft", "value": "#DCFFFFFF" },
+    { "name": "hero_track", "value": "#4DFFFFFF" }
+  ]
+}
