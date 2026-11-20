@@ -133,7 +133,8 @@ struct Index {
       this.message = this.server.lastError;
     }
     if (this.showLogs) {
-      this.logs = Logger.lines.slice(Math.max(0, Logger.lines.length - 60));
+      // 倒序：最新的在最上面，不用滚动就能看到刚发生的事
+      this.logs = Logger.lines.slice(Math.max(0, Logger.lines.length - 60)).reverse();
     }
   }
 

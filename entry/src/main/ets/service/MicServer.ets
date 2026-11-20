@@ -237,14 +237,33 @@ export class MicServer {
         this.disconnectHandler();
       }
     });
-    conn.getRemoteAddress().then((addr: socket.NetAddress) => {
-      this.clientIp = addr.address;
-      Logger.log('server', `client ip = ${addr.address}`);
+    // getRemoteAddress 只用来拿电脑 IP 显示和推流目标。
+    // 它一旦失败，原来的写法会导致：握手照常成功（PC 显示已连接），
+    // 但 clientHandler 不触发 → 采集不启动 → PC 端一个音频包都收不到，
+    // 而手机 UI 还停在「等待电脑连接」。所以要重试，并在最终失败时明确报错。
+    const attachClient = (ip: string): void => {
+      this.clientIp = ip;
       this.state = ServerState.ClientConnected;
       this.stateHandler();
-      this.clientHandler(addr.address);
+      this.clientHandler(ip);
+    };
+
+    conn.getRemoteAddress().then((addr: socket.NetAddress) => {
+      Logger.log('server', `client ip = ${addr.address}`);
+      attachClient(addr.address);
     }).catch((err: Object) => {
-      Logger.log('server', `getRemoteAddress failed: ${err}`);
+      Logger.log('server', `getRemoteAddress failed: ${err}, retry after 200ms`);
+      setTimeout(() => {
+        conn.getRemoteAddress().then((addr2: socket.NetAddress) => {
+          Logger.log('server', `client ip (retry) = ${addr2.address}`);
+          attachClient(addr2.address);
+        }).catch((err2: Object) => {
+          Logger.log('server', `getRemoteAddress retry failed: ${err2}`);
+          this.lastError = '拿不到电脑端地址，请在电脑上重连一次';
+          this.state = ServerState.Listening;
+          this.stateHandler();
+        });
+      }, 200);
     });
     // 服务端先下发 ProtoServerConfig
     this.sendToClient(buildServerConfig(this.deviceName));

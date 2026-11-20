@@ -116,19 +116,79 @@ devecocli run --skip-build --module entry --device <手机IP:端口> --ability E
 要点：
 
 1. 界面为自绘现代风格（深浅色跟随系统，Windows 11 圆角 + 深色标题栏）
-2. **图形界面单例**：重复启动不会开第二个窗口，只会把已有窗口切到前台（`--headless` / `--help` / `--discover` 等控制台模式不受限制）
+2. **逻辑单例、前端可多开**：接收逻辑（发现 / 连接 / 收流 / 写声卡）由一个
+   `ReceiverHost` 独占，靠命名管道互斥量保证；GUI 和 CLI 都只是它的前端，详见下文
 3. **缺少 VB-CABLE 时顶部会有引导卡片，可一键下载并静默安装**
 4. 运行 `MicCastReceiver.exe`，手机列表自动出现，选中 → 输出设备选 `CABLE Input` → 开始接收
 5. **断线自动重连**：手机端停止服务或网络中断时，状态立刻变成「重连中…」，每 2 秒重试一次，
    手机重新点「启动麦克风服务」后会自动连回来；想放弃就点「取消重连」
 6. 会议软件 / Win+H 的麦克风选 `CABLE Output`，或 `Set-DefaultMic.ps1 -Name 'CABLE Output'` 设为默认
 
-### 无头模式（不开窗口）
+### 无头模式与「逻辑单例」架构
 
-不想每次点界面，或者要开机自启 / 写脚本时用 `--headless`：
+程序分成**一份逻辑 + 多个前端**：
+
+```
+        ┌─────────────────────────────┐
+        │  ReceiverHost（唯一逻辑）    │  ← 命名管道互斥量就是单例锁
+        │  发现 / 连接 / 收流 / 写声卡  │
+        │  重连 / 设备选择 / 状态快照   │
+        └──────┬───────────────┬──────┘
+          进程内 │               │ 命名管道 IPC
+        ┌──────▼─────┐    ┌────▼──────┐
+        │  GUI 前端   │    │  CLI 前端  │
+        └────────────┘    └───────────┘
+```
+
+谁先启动谁拿到 `Local\MicCastReceiver.Backend` 互斥量，成为**宿主**；后启动的进程
+自动作为**前端**连上去（`\\.\pipe\MicCastReceiver.Backend`）。
+
+这样解决了一个很难排查的问题：以前允许 GUI 和 CLI 并存时，两个进程都会 bind
+UDP 59100（都开了 `SO_REUSEADDR`），**后绑定的一方会抢走全部数据包** ——
+表现是「手机端 `sendErr=0` 明明在发，接收端 fps 却一直是 0」。
+
+所以现在：
+
+- GUI 开着时，`--status` 能查到它的实时状态，`--headless` 会被拒绝
+- CLI 跑着时，打开 GUI 会自动作为客户端连上去（可以开多个窗口看同一份状态）
+- 任意时刻只有**一个进程**在碰 UDP 59100 和声卡
+
+#### 状态同步用的是 Rx，不是手写事件
+
+`IBackend` 对外只暴露两条可观察流，没有 `event`、没有轮询：
+
+```csharp
+IObservable<StatusDto> StateStream { get; }   // BehaviorSubject：后订阅立刻拿到当前值
+IObservable<string>    LogStream   { get; }   // ReplaySubject：重放最近 120 条
+```
+
+前端这样用：
+
+```csharp
+var ui = SynchronizationContext.Current;
+_backend.LogStream.ObserveOn(ui).Subscribe(OnLog);
+_backend.StateStream.ObserveOn(ui).Sample(TimeSpan.FromMilliseconds(60))
+        .Subscribe(_ => UpdateState());
+```
+
+这三行替代了原来的一堆手写逻辑，各自负责一件事：
+
+| 手写时代的问题 | Rx 的解法 |
+|---|---|
+| 后台先启动，界面后打开 → 第一帧之后再也不更新 | `BehaviorSubject` 重放当前值 |
+| 日志在界面订阅前就推完 → 日志框一片空白 | `ReplaySubject` 重放历史 |
+| 后台线程直接摸控件 → 要手动 `BeginInvoke`，句柄没建好还会抛异常把读循环带走 | `ObserveOn(uiContext)` |
+| 每 60ms 全量刷新 → 无谓重绘 | `Sample(60ms)` + 列表 `sameSet` 短路 |
+
+> 这是踩坑踩出来的：WinForms 没有数据绑定，所有 `label.Text = ...` 都得手写，
+> 于是「订阅者生命周期、历史重放、线程调度、刷新节流」这四件事全落在业务代码里，
+> 漏一件就出一次难查的 bug。换 WPF/WinUI 3 + MVVM 当然更彻底，
+> 但当前 UI 是自绘的、视觉上没问题，用 Rx 收敛状态流是性价比最高的做法。
+
+### 命令行
 
 ```powershell
-# 直连指定手机，Ctrl+C 退出
+# 自己当宿主，不开窗口跑接收，Ctrl+C 退出
 MicCastReceiver.exe --headless --ip 192.168.3.168
 
 # 不给 IP，自动发现（默认等 30 秒，可用 --discover-timeout 调长）
@@ -136,9 +196,21 @@ MicCastReceiver.exe --headless
 
 # 跑 30 秒自动退出，只输出连接/断开等关键事件
 MicCastReceiver.exe --headless --duration 30 --quiet
+
+# 查已有后台的状态（无论它是 GUI 还是无头模式启动的），一次性输出后退出
+MicCastReceiver.exe --status
 ```
 
-运行中每秒打印一行，字段名固定，方便脚本取用：
+`--status` 输出示例：
+
+```
+connected=True want=True fps=203 kbps=253 loss=0.00% buf=75ms target=69ms
+          jitter=6.0ms underrun=417ms dropped=0ms rate=0.999x device=CABLE Input
+servers=1
+  CHZ-AL00 (MicCast)|192.168.3.168|v0.27.5
+```
+
+无头模式运行中每秒打印一行，字段名固定，方便脚本取用：
 
 ```
 STATS fps=200 kbps=255 loss=0.00% buf=35ms target=30ms jitter=5.2ms
@@ -159,6 +231,9 @@ MicCastReceiver.exe --list-devices        # 列出播放设备索引
 MicCastReceiver.exe --discover 6          # 扫描局域网手机后退出
 MicCastReceiver.exe --help                # 完整参数说明
 ```
+
+> 脚本里调用建议用 `Start-Process -RedirectStandardOutput`，或直接在交互式控制台里敲 ——
+> 本程序是 WinExe（双击不弹黑框），部分终端下不附加父控制台，管道捕获可能拿不到输出。
 
 ## 目录结构
 
@@ -190,7 +265,10 @@ MicCast/
 │   │   ├── Protocol.cs                   # 协议常量 / 消息构造 / 发现包解析
 │   │   ├── AudioPlayer.cs                # NAudio WasapiOut
 │   │   ├── VbCable.cs                    # VB-CABLE 检测 + 一键下载安装
-│   │   ├── SingleInstance.cs             # 图形界面单例（命名互斥量 + 激活已有窗口）
+│   │   ├── Backend/                      # 逻辑层（与界面解耦）
+│   │   │   ├── IBackend.cs               # 前端看到的统一门面（状态流 + 日志流）
+│   │   │   ├── ReceiverHost.cs           # 唯一逻辑：发现/连接/重连/设备选择
+│   │   │   └── BackendPipe.cs            # 命名管道服务端 + 客户端（逻辑单例的执行者）
 │   │   ├── MainForm.cs                   # 主界面与布局
 │   │   ├── Program.cs                    # 命令行入口（GUI / --headless / --discover / --list-devices）
 │   │   └── Ui/                           # 自绘控件（零第三方 UI 库）

@@ -2,13 +2,15 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using MicCastReceiver.Ui;
+using System.Reactive.Linq;
 
 namespace MicCastReceiver;
 
 public sealed class MainForm : Form
 {
-    private readonly Receiver _receiver = new();
-    private readonly Discovery _discovery = new();
+    // 界面只依赖 IBackend：可能是进程内的 ReceiverHost，也可能是连到别的进程的 PipeBackend。
+    // 具体是哪一种由 Program 决定，界面不关心 —— 这就是逻辑与 UX 的分离点。
+    private readonly IBackend _backend;
     private readonly StartOptions _options;
 
     private readonly Label _title = new();
@@ -50,21 +52,23 @@ public sealed class MainForm : Form
     private readonly TextBox _logBox = new();
 
     private readonly System.Windows.Forms.Timer _uiTimer = new();
-    private readonly System.Windows.Forms.Timer _reconnectTimer = new();
 
     private List<Protocol.DiscoveredServer> _serverItems = new();
     private string _selectedIp = string.Empty;
     private bool _syncingServerBox;
     private bool _installing;
-    /// <summary>用户希望保持接收（手机断开后会自动重连），与「当前是否连着」区分开。</summary>
-    private bool _wantReceiving;
-    private bool _reconnecting;
+    private readonly List<string> _earlyLogs = new();
+    private IDisposable? _stateSubscription;
+    private IDisposable? _logSubscription;
 
     public MainForm() : this(new StartOptions()) { }
 
-    public MainForm(StartOptions options)
+    public MainForm(StartOptions options) : this(options, new ReceiverHost()) { }
+
+    public MainForm(StartOptions options, IBackend backend)
     {
         _options = options;
+        _backend = backend;
 
         Theme.Apply(_options.Theme.ToLowerInvariant() switch
         {
@@ -72,7 +76,7 @@ public sealed class MainForm : Form
             "light" => AppTheme.Light,
             _ => Theme.DetectSystemTheme()
         });
-        _receiver.Profile = _options.Latency;
+        _backend.Profile = _options.Latency;
 
         Text = "MicCast — 手机麦克风接收端";
         AutoScaleMode = AutoScaleMode.None;
@@ -96,16 +100,17 @@ public sealed class MainForm : Form
         }
         _pill.Set("未启动", Theme.TextFaint);
 
-        _receiver.Log += OnLog;
-        _receiver.StateChanged += () => BeginInvoke(new Action(UpdateState));
-        _receiver.Disconnected += () => BeginInvoke(new Action(OnPeerDisconnected));
+        // 用 Rx 订阅：ObserveOn 保证回到 UI 线程，BehaviorSubject/ReplaySubject
+        // 保证「晚订阅也能拿到当前状态和历史日志」，Sample 限制刷新频率。
+        var uiContext = System.Threading.SynchronizationContext.Current;
+        _logSubscription = _backend.LogStream
+            .ObserveOn(uiContext)
+            .Subscribe(OnLog);
 
-        _reconnectTimer.Interval = 2000;
-        _reconnectTimer.Tick += async (_, _) => await TryReconnectAsync();
-
-        _discovery.Log += OnLog;
-        _discovery.Changed += () => BeginInvoke(new Action(RefreshServerList));
-        _discovery.Start();
+        _stateSubscription = _backend.StateStream
+            .ObserveOn(uiContext)
+            .Sample(TimeSpan.FromMilliseconds(60))
+            .Subscribe(_ => { UpdateState(); RefreshServerList(); });
 
         _uiTimer.Interval = 60;
         _uiTimer.Tick += (_, _) => UpdateStats();
@@ -116,8 +121,12 @@ public sealed class MainForm : Form
             NativeFx.Apply(this, Theme.Current == AppTheme.Dark);
             RefreshBanner();
             DoLayout();
-            if (_options.AutoStart)
+            FlushEarlyLogs();
+            if (_options.AutoStart && !_backend.WantReceiving)
             {
+                // 仅在后台还没开始接收时才自动启动。
+                // 后台（可能是 CLI 起的）已经在跑时必须保持原状 ——
+                // 否则打开界面就会把正在进行的接收停掉。
                 if (await EnsureTargetAsync()) await ToggleAsync();
                 if (_options.LoopbackVerifyMs > 0)
                 {
@@ -297,7 +306,7 @@ public sealed class MainForm : Form
         LayoutDeviceCard();
         y += S(150) + S(14);
 
-        int statusHeight = _receiver.Connected ? S(132) : S(74);
+        int statusHeight = _backend.Connected ? S(132) : S(74);
         _statusCard.SetBounds(pad, y, width, statusHeight);
         LayoutStatusCard();
         y += statusHeight + S(14);
@@ -348,7 +357,7 @@ public sealed class MainForm : Form
     {
         int w = _statusCard.Width;
         int left = S(18);
-        bool running = _receiver.Connected;
+        bool running = _backend.Connected;
 
         _hint.Visible = !running;
         _hint.SetBounds(left, S(4), w - S(36), S(64));
@@ -397,7 +406,7 @@ public sealed class MainForm : Form
 
     private void LoadDevices()
     {
-        var devices = _receiver.GetDevices();
+        var devices = _backend.GetDevices();
         _deviceBox.Items = devices.Select(d => $"[{d.Index}] {d.Name}").ToArray();
 
         int preferred = -1;
@@ -415,7 +424,7 @@ public sealed class MainForm : Form
 
     private void RefreshServerList()
     {
-        var servers = _discovery.Servers;
+        var servers = _backend.Servers;
         bool sameSet = servers.Count == _serverItems.Count
                        && servers.Zip(_serverItems).All(p => p.First.Ip == p.Second.Ip && p.First.Name == p.Second.Name);
         if (sameSet)
@@ -449,7 +458,7 @@ public sealed class MainForm : Form
             _syncingServerBox = false;
         }
 
-        if (!_receiver.Connected)
+        if (!_backend.Connected)
         {
             _pill.Set(_serverItems.Count > 0 ? "已发现手机" : "未启动",
                 _serverItems.Count > 0 ? Theme.Accent : Theme.TextFaint);
@@ -460,9 +469,9 @@ public sealed class MainForm : Form
 
     private void UpdateHint()
     {
-        if (_receiver.Connected) return;
-        _hint.Text = _receiver.LastError.Length > 0
-            ? _receiver.LastError
+        if (_backend.Connected) return;
+        _hint.Text = _backend.LastError.Length > 0
+            ? _backend.LastError
             : (_serverItems.Count > 0
                 ? "已发现手机，确认输出设备是 CABLE Input 后点「开始接收」。"
                 : "先在手机上点「启动麦克风服务」，手机会自动出现在上面的列表里。");
@@ -554,11 +563,10 @@ public sealed class MainForm : Form
 
     private async Task ToggleAsync()
     {
-        if (_wantReceiving)
+        // 重连逻辑已经上移到 ReceiverHost，这里只表达用户意图
+        if (_backend.WantReceiving)
         {
-            _wantReceiving = false;
-            _reconnectTimer.Stop();
-            await _receiver.StopAsync();
+            await _backend.StopAsync();
             UpdateState();
             return;
         }
@@ -579,83 +587,47 @@ public sealed class MainForm : Form
         }
 
         SaveLastIp(ip);
-        _wantReceiving = true;
         _startButton.Enabled = false;
         try
         {
-            await _receiver.StartAsync(ip, _deviceBox.SelectedIndex);
+            await _backend.StartAsync(ip, _deviceBox.SelectedIndex);
         }
         finally
         {
             _startButton.Enabled = true;
             UpdateState();
         }
-        // 首次连接失败也继续重试 —— 手机可能还没点「启动」
-        if (!_receiver.Connected && _wantReceiving)
-        {
-            _reconnectTimer.Start();
-        }
-    }
-
-    private void OnPeerDisconnected()
-    {
-        if (!_wantReceiving)
-        {
-            return;
-        }
-        OnLog($"{DateTime.Now:HH:mm:ss} 手机端已断开，正在自动重连…");
-        _reconnectTimer.Start();
-    }
-
-    private async Task TryReconnectAsync()
-    {
-        // 连接可能要好几秒，期间不能再次进入，否则 StopAsync 会取消掉正在进行的连接
-        if (_reconnecting)
-        {
-            return;
-        }
-        if (!_wantReceiving || _receiver.Connected)
-        {
-            _reconnectTimer.Stop();
-            return;
-        }
-        string ip = _ipBox.Text.Trim();
-        if (!System.Net.IPAddress.TryParse(ip, out _) || _deviceBox.SelectedIndex < 0)
-        {
-            _reconnectTimer.Stop();
-            return;
-        }
-
-        _reconnecting = true;
-        _reconnectTimer.Stop();
-        try
-        {
-            await _receiver.StartAsync(ip, _deviceBox.SelectedIndex);
-            if (_receiver.Connected)
-            {
-                OnLog($"{DateTime.Now:HH:mm:ss} 已重新连上手机");
-            }
-        }
-        finally
-        {
-            _reconnecting = false;
-            if (_wantReceiving && !_receiver.Connected)
-            {
-                _reconnectTimer.Start();
-            }
-            UpdateState();
-        }
     }
 
     private void OnLog(string line)
     {
-        if (InvokeRequired)
+        // 走 Rx 订阅后这里已经保证在 UI 线程；句柄未就绪的情况由 _earlyLogs 兜底
+        if (!IsHandleCreated || IsDisposed)
         {
-            BeginInvoke(new Action<string>(OnLog), line);
+            lock (_earlyLogs)
+            {
+                _earlyLogs.Add(line);
+                if (_earlyLogs.Count > 200) _earlyLogs.RemoveAt(0);
+            }
             return;
         }
         _logBox.AppendText(line + Environment.NewLine);
         WriteTrace(line);
+    }
+
+    private void FlushEarlyLogs()
+    {
+        List<string> pending;
+        lock (_earlyLogs)
+        {
+            if (_earlyLogs.Count == 0) return;
+            pending = _earlyLogs.ToList();
+            _earlyLogs.Clear();
+        }
+        foreach (var line in pending)
+        {
+            _logBox.AppendText(line + Environment.NewLine);
+        }
     }
 
     private void WriteTrace(string line)
@@ -666,8 +638,8 @@ public sealed class MainForm : Form
 
     private void UpdateState()
     {
-        bool running = _receiver.Connected;
-        bool reconnecting = _wantReceiving && !running;
+        bool running = _backend.Connected;
+        bool reconnecting = _backend.WantReceiving && !running;
         _startButton.Text = running ? "停止接收" : (reconnecting ? "取消重连" : "开始接收");
         _startButton.Kind = running ? ButtonKind.Danger : (reconnecting ? ButtonKind.Danger : ButtonKind.Primary);
 
@@ -679,7 +651,7 @@ public sealed class MainForm : Form
         {
             _pill.Set("重连中…", Theme.Warn);
         }
-        else if (_receiver.LastError.Length > 0)
+        else if (_backend.LastError.Length > 0)
         {
             _pill.Set("连接失败", Theme.Danger);
         }
@@ -699,8 +671,8 @@ public sealed class MainForm : Form
         }
         else if (!running)
         {
-            _hint.Text = _receiver.LastError.Length > 0
-                ? _receiver.LastError
+            _hint.Text = _backend.LastError.Length > 0
+                ? _backend.LastError
                 : (_serverItems.Count > 0
                     ? "已发现手机，选好输出设备后点「开始接收」。"
                     : "先在手机上点「启动麦克风服务」，手机会自动出现在上面的列表里。");
@@ -708,7 +680,7 @@ public sealed class MainForm : Form
         }
         else
         {
-            _serverLine.Text = $"缓冲 {_receiver.BufferedMs}ms / 目标 {_receiver.TargetMs}ms　抖动 {_receiver.JitterMs:F1}ms　丢包 {_receiver.LossPercent:F2}%　速率 {_receiver.AveragePlaybackRate:F3}x　丢弃 {_receiver.DroppedMs:F0}ms　欠载 {_receiver.UnderrunMs:F0}ms";
+            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {_backend.UnderrunMs:F0}ms";
         }
 
         DoLayout();
@@ -717,20 +689,20 @@ public sealed class MainForm : Form
 
     private void UpdateStats()
     {
-        if (_receiver.Connected)
+        if (_backend.Connected)
         {
-            _fpsValue.Text = $"{_receiver.Fps:F0}";
-            _kbpsValue.Text = $"{_receiver.Kbps:F0}";
-            _bufValue.Text = $"{_receiver.BufferedMs}";
-            _serverLine.Text = $"缓冲 {_receiver.BufferedMs}ms / 目标 {_receiver.TargetMs}ms　抖动 {_receiver.JitterMs:F1}ms　丢包 {_receiver.LossPercent:F2}%　速率 {_receiver.AveragePlaybackRate:F3}x　丢弃 {_receiver.DroppedMs:F0}ms　欠载 {_receiver.UnderrunMs:F0}ms";
+            _fpsValue.Text = $"{_backend.Fps:F0}";
+            _kbpsValue.Text = $"{_backend.Kbps:F0}";
+            _bufValue.Text = $"{_backend.BufferedMs}";
+            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {_backend.UnderrunMs:F0}ms";
 
-            double level = Math.Clamp(_receiver.Level, 0, 1);
+            double level = Math.Clamp(_backend.Level, 0, 1);
             double scaled = level <= 0.0001 ? 0 : Math.Clamp((20 * Math.Log10(level) + 60) / 60, 0, 1);
             _level.SetLevel((float)scaled);
 
-            if (_options.LogPath.Length > 0 && _receiver.Frames > 0)
+            if (_options.LogPath.Length > 0 && _backend.Frames > 0)
             {
-                WriteTrace($"STATS frames={_receiver.Frames} fps={_receiver.Fps:F0} kbps={_receiver.Kbps:F0} loss={_receiver.LossPercent:F3}% lostFrames={_receiver.LostFrames} outOfOrder={_receiver.OutOfOrderCount} buffered={_receiver.BufferedMs}ms target={_receiver.TargetMs}ms jitter={_receiver.JitterMs:F2}ms rate={_receiver.AveragePlaybackRate:F4} dropped={_receiver.DroppedMs:F0}ms overflow={_receiver.CatchUpCount} underrun={_receiver.UnderrunMs:F0}ms underrunCount={_receiver.UnderrunCount} level={_receiver.Level:F4} device={_receiver.DeviceName}");
+                WriteTrace($"STATS frames={_backend.Frames} fps={_backend.Fps:F0} kbps={_backend.Kbps:F0} loss={_backend.LossPercent:F3}% lostFrames={_backend.LostFrames} outOfOrder={_backend.OutOfOrderCount} buffered={_backend.BufferedMs}ms target={_backend.TargetMs}ms jitter={_backend.JitterMs:F2}ms rate={_backend.AveragePlaybackRate:F4} dropped={_backend.DroppedMs:F0}ms overflow={_backend.CatchUpCount} underrun={_backend.UnderrunMs:F0}ms underrunCount={_backend.UnderrunCount} level={_backend.Level:F4} device={_backend.DeviceName}");
             }
         }
         else
@@ -740,7 +712,7 @@ public sealed class MainForm : Form
             _fpsValue.Text = "0";
             _kbpsValue.Text = "0";
             _bufValue.Text = "0";
-            _serverLine.Text = _wantReceiving ? "手机端已断开，等待重连…" : "";
+            _serverLine.Text = _backend.WantReceiving ? "后台正在重连…" : "";
         }
     }
 
@@ -823,11 +795,10 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        _reconnectTimer.Stop();
         _uiTimer.Stop();
-        _wantReceiving = false;
-        try { _discovery.Dispose(); } catch { }
-        try { _receiver.Dispose(); } catch { }
+        try { _stateSubscription?.Dispose(); } catch { }
+        try { _logSubscription?.Dispose(); } catch { }
+        try { _backend.Dispose(); } catch { }
         base.OnFormClosing(e);
     }
 }

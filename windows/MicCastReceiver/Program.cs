@@ -1,10 +1,45 @@
+using System.Runtime.InteropServices;
+
 namespace MicCastReceiver;
 
 internal static class Program
 {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(int dwProcessId);
+
+    private const int AttachParentProcess = -1;
+
+    /// <summary>
+    /// 本程序编译成 WinExe（为了双击不弹黑框），代价是即使在命令行里调用也不会附加到父控制台，
+    /// Console.WriteLine 的输出会直接丢掉。有命令行参数时手动附加一次，才能看到 --status 之类的输出。
+    /// </summary>
+    private static void EnsureConsole()
+    {
+        try { AttachConsole(AttachParentProcess); } catch { }
+        try
+        {
+            var stdout = Console.OpenStandardOutput();
+            if (stdout is not null)
+            {
+                Console.SetOut(new StreamWriter(stdout) { AutoFlush = true });
+            }
+            var stderr = Console.OpenStandardError();
+            if (stderr is not null)
+            {
+                Console.SetError(new StreamWriter(stderr) { AutoFlush = true });
+            }
+        }
+        catch { }
+    }
+
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Any(a => a.StartsWith("--") || a.StartsWith("-") || a.StartsWith("/")))
+        {
+            EnsureConsole();
+        }
+
         // 统一 UTF-8 输出，否则控制台按 GBK 解码会把中文帮助信息显示成乱码
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
@@ -35,37 +70,119 @@ internal static class Program
             return;
         }
 
-        // 无头模式：不开窗口，直接用控制台跑接收。必须在单实例检查之前，
-        // 否则会和正在运行的图形界面抢同一个互斥量。
-        if (options.Headless)
+        // --status：连已有后台打印一次状态后退出（不抢占宿主身份）
+        if (options.Status)
         {
-            Environment.ExitCode = RunHeadlessAsync(options).GetAwaiter().GetResult();
+            Environment.ExitCode = RunStatusAsync().GetAwaiter().GetResult();
             return;
         }
 
-        // 图形界面只允许一个实例；再次启动就把已有窗口叫到前台
-        if (!SingleInstance.TryAcquire())
+        // --headless：自己当宿主，不开窗口跑接收
+        if (options.Headless)
         {
-            SingleInstance.ActivateExisting();
+            var host = new ReceiverHost { Profile = options.Latency };
+            if (!BackendServer.TryCreate(host, out BackendServer? server) || server is null)
+            {
+                Console.Error.WriteLine(
+                    "ERROR 已经有一个 MicCast 后台在运行（图形界面或无头模式）。");
+                Console.Error.WriteLine(
+                    "      用 --status 查看它的状态，或先关掉它。");
+                host.Dispose();
+                Environment.ExitCode = 6;
+                return;
+            }
+            try
+            {
+                Environment.ExitCode = RunHeadlessAsync(options, host).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                host.Dispose();
+                server.Dispose();
+            }
             return;
         }
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new MainForm(options));
+
+        // 逻辑单例：谁拿到 BackendServer 的互斥量谁就是宿主，
+        // 其余进程一律作为前端连上去 —— 这样不会再出现两个进程抢 UDP 59100 和声卡。
+        var guiHost = new ReceiverHost { Profile = options.Latency };
+        BackendServer? guiServer = null;
+        IBackend backend;
+        if (BackendServer.TryCreate(guiHost, out guiServer) && guiServer is not null)
+        {
+            backend = guiHost;
+        }
+        else
+        {
+            var pipe = PipeBackend.ConnectAsync().GetAwaiter().GetResult();
+            guiHost.Dispose();
+            if (pipe is null)
+            {
+                MessageBox.Show(
+                    "MicCast 的后台正在运行，但界面连不上它的通信通道。\n\n" +
+                    "请先在任务管理器里结束 MicCastReceiver 进程，再重新打开。",
+                    "无法连接后台", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            backend = pipe;
+        }
+
+        try
+        {
+            Application.Run(new MainForm(options, backend));
+        }
+        finally
+        {
+            backend.Dispose();
+            guiServer?.Dispose();
+        }
+    }
+
+    /// <summary>查询已有后台的状态，一次性输出后退出。</summary>
+    private static async Task<int> RunStatusAsync()
+    {
+        var pipe = await PipeBackend.ConnectAsync(1200);
+        if (pipe is null)
+        {
+            Console.WriteLine("没有正在运行的 MicCast 后台");
+            return 7;
+        }
+        using (pipe)
+        {
+            // 服务端连上就推一帧完整状态，稍等一下即可
+            for (int i = 0; i < 20 && pipe.PhoneIp.Length == 0 && !pipe.Connected; i++)
+            {
+                await Task.Delay(50);
+            }
+            await Task.Delay(120);
+            Console.WriteLine(
+                $"connected={pipe.Connected} want={pipe.WantReceiving} " +
+                $"fps={pipe.Fps:F0} kbps={pipe.Kbps:F0} loss={pipe.LossPercent:F2}% " +
+                $"buf={pipe.BufferedMs}ms target={pipe.TargetMs}ms jitter={pipe.JitterMs:F1}ms " +
+                $"underrun={pipe.UnderrunMs:F0}ms dropped={pipe.DroppedMs:F0}ms " +
+                $"rate={pipe.AveragePlaybackRate:F3}x device={pipe.DeviceName}");
+            var servers = pipe.Servers;
+            Console.WriteLine($"servers={servers.Count}");
+            foreach (var s in servers) Console.WriteLine($"  {s.Name}|{s.Ip}|v{s.Version}");
+            if (pipe.LastError.Length > 0) Console.WriteLine($"lastError={pipe.LastError}");
+        }
+        return 0;
     }
 
     /// <summary>
-    /// 无窗口运行：发现手机 → 连接 → 写入声卡 → 每秒打一行 STATS，断线自动重连。
-    /// 供脚本、开机自启、以及没有图形环境时使用。
+    /// 无窗口运行：连上手机、写入声卡、每秒打一行 STATS。
+    /// 自动重连由 ReceiverHost 负责，这里只管输出和退出条件。
     /// </summary>
-    private static async Task<int> RunHeadlessAsync(StartOptions options)
+    private static async Task<int> RunHeadlessAsync(StartOptions options, IBackend backend)
     {
         void Say(string s) => Console.WriteLine($"{DateTime.Now:HH:mm:ss} {s}");
 
         int deviceIndex = options.Device;
         if (deviceIndex < 0)
         {
-            var devices = AudioPlayer.GetRenderDevices();
+            var devices = backend.GetDevices();
             var match = devices.FirstOrDefault(d =>
                 d.Name.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase));
             if (match.Name is null)
@@ -80,37 +197,40 @@ internal static class Program
         string ip = options.Ip;
         if (ip.Length == 0)
         {
-            Say($"未指定 --ip，监听 UDP {Protocol.DiscoveryPort} 等待手机广播…");
-            var found = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using (var discovery = new Discovery())
+            Say($"未指定 --ip，等待手机广播（最多 {options.DiscoverTimeoutSeconds} 秒）…");
+            var deadline = DateTime.UtcNow.AddSeconds(options.DiscoverTimeoutSeconds);
+            while (DateTime.UtcNow < deadline)
             {
-                discovery.Changed += () =>
+                var first = backend.Servers.FirstOrDefault();
+                if (first is not null)
                 {
-                    var first = discovery.Servers.FirstOrDefault();
-                    if (first is not null) found.TrySetResult(first.Ip);
-                };
-                discovery.Start();
-                if (!discovery.Running)
-                {
-                    Say($"ERROR 无法监听 UDP {Protocol.DiscoveryPort}，端口可能被占用");
-                    return 3;
+                    ip = first.Ip;
+                    break;
                 }
-                var completed = await Task.WhenAny(found.Task, Task.Delay(TimeSpan.FromSeconds(options.DiscoverTimeoutSeconds)));
-                if (completed != found.Task)
-                {
-                    Say($"ERROR {options.DiscoverTimeoutSeconds} 秒内没发现手机，确认手机上已点「启动麦克风服务」");
-                    return 4;
-                }
-                ip = await found.Task;
+                await Task.Delay(200);
+            }
+            if (ip.Length == 0)
+            {
+                Say($"ERROR {options.DiscoverTimeoutSeconds} 秒内没发现手机，确认手机上已点「启动麦克风服务」");
+                return 4;
             }
             Say($"发现手机 {ip}");
         }
 
-        using var receiver = new Receiver();
-        receiver.Profile = options.Latency;
-        // Receiver.Emit 输出的行本身已带时间戳，这里不要再叠加一层
-        if (!options.Quiet) receiver.Log += line => Console.WriteLine(line);
-        else receiver.Log += line => { if (line.Contains("失败") || line.Contains("断开")) Console.WriteLine(line); };
+        if (options.Quiet)
+        {
+            backend.LogStream.Subscribe(line =>
+            {
+                if (line.Contains("失败") || line.Contains("断开") || line.Contains("重连"))
+                {
+                    Console.WriteLine(line);
+                }
+            });
+        }
+        else
+        {
+            backend.LogStream.Subscribe(line => Console.WriteLine(line));
+        }
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
@@ -119,62 +239,37 @@ internal static class Program
             cts.Cancel();
         };
 
-        var deadline = options.DurationSeconds > 0
+        await backend.StartAsync(ip, deviceIndex);
+        Say(backend.Connected
+            ? "已连接，开始接收"
+            : $"连接失败: {(backend.LastError.Length > 0 ? backend.LastError : "未知原因")}，后台会每 2 秒自动重试");
+
+        var stopAt = options.DurationSeconds > 0
             ? DateTime.UtcNow.AddSeconds(options.DurationSeconds)
             : DateTime.MaxValue;
 
-        int statsTick = 0;
-        double lastUnderrunMs = 0;
-        string lastStatLine = string.Empty;
-
-        while (!cts.IsCancellationRequested && DateTime.UtcNow < deadline)
+        double lastUnderrunMs = backend.UnderrunMs;
+        while (!cts.IsCancellationRequested && DateTime.UtcNow < stopAt)
         {
-            if (!receiver.Connected)
-            {
-                await receiver.StartAsync(ip, deviceIndex);
-                if (!receiver.Connected)
-                {
-                    Say($"连接失败: {(receiver.LastError.Length > 0 ? receiver.LastError : "未知原因")}，2 秒后重试");
-                    if (!await SafeDelayAsync(2000, cts.Token)) break;
-                    continue;
-                }
-                Say("已连接，开始接收");
-                lastUnderrunMs = 0;
-            }
+            try { await Task.Delay(1000, cts.Token); }
+            catch (OperationCanceledException) { break; }
 
-            if (!await SafeDelayAsync(1000, cts.Token)) break;
+            if (options.Quiet) continue;
 
-            if (receiver.Connected && !options.Quiet)
-            {
-                statsTick++;
-                // 每秒一行，字段名稳定，方便脚本 awk / Select-String 取用
-                lastStatLine =
-                    $"STATS fps={receiver.Fps:F0} kbps={receiver.Kbps:F0} loss={receiver.LossPercent:F2}% " +
-                    $"buf={receiver.BufferedMs}ms target={receiver.TargetMs}ms jitter={receiver.JitterMs:F1}ms " +
-                    $"underrun={receiver.UnderrunMs:F0}ms underrunDelta={receiver.UnderrunMs - lastUnderrunMs:F0}ms " +
-                    $"dropped={receiver.DroppedMs:F0}ms rate={receiver.AveragePlaybackRate:F3}x";
-                Console.WriteLine(lastStatLine);
-                lastUnderrunMs = receiver.UnderrunMs;
-            }
+            // 字段名固定，方便脚本 awk / Select-String 直接取
+            Console.WriteLine(
+                $"STATS fps={backend.Fps:F0} kbps={backend.Kbps:F0} loss={backend.LossPercent:F2}% " +
+                $"buf={backend.BufferedMs}ms target={backend.TargetMs}ms jitter={backend.JitterMs:F1}ms " +
+                $"underrun={backend.UnderrunMs:F0}ms underrunDelta={backend.UnderrunMs - lastUnderrunMs:F0}ms " +
+                $"dropped={backend.DroppedMs:F0}ms rate={backend.AveragePlaybackRate:F3}x");
+            lastUnderrunMs = backend.UnderrunMs;
         }
 
-        try { await receiver.StopAsync(); } catch { }
+        await backend.StopAsync();
         Say("已退出");
         return 0;
     }
 
-    private static async Task<bool> SafeDelayAsync(int ms, CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(ms, token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-    }
 
     /// <summary>无界面扫描局域网内的手机，供脚本/自检使用。</summary>
     private static void RunDiscover(int seconds)
@@ -267,6 +362,8 @@ public sealed class StartOptions
     public LatencyProfile Latency { get; init; } = LatencyProfile.Balanced;
     /// <summary>不开窗口，直接在控制台跑接收</summary>
     public bool Headless { get; init; }
+    /// <summary>连已有后台打印一次状态后退出</summary>
+    public bool Status { get; init; }
     /// <summary>无头模式下只输出关键事件，不打每秒 STATS</summary>
     public bool Quiet { get; init; }
     /// <summary>无头模式运行多少秒后自动退出，0 表示一直跑</summary>
@@ -283,6 +380,7 @@ public sealed class StartOptions
         int loopback = 0;
         string theme = string.Empty;
         bool headless = false;
+        bool status = false;
         bool quiet = false;
         int duration = 0;
         int discoverTimeout = 30;
@@ -321,6 +419,9 @@ public sealed class StartOptions
                 case "--headless" or "--no-gui":
                     headless = true;
                     break;
+                case "--status":
+                    status = true;
+                    break;
                 case "--quiet" or "-q":
                     quiet = true;
                     break;
@@ -336,7 +437,7 @@ public sealed class StartOptions
         {
             Ip = ip, Device = device, AutoStart = auto, LogPath = log,
             LoopbackVerifyMs = loopback, Theme = theme, Latency = latency,
-            Headless = headless, Quiet = quiet, DurationSeconds = duration,
+            Headless = headless, Status = status, Quiet = quiet, DurationSeconds = duration,
             DiscoverTimeoutSeconds = Math.Max(1, discoverTimeout)
         };
     }
