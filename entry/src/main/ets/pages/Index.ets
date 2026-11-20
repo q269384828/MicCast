@@ -171,7 +171,7 @@ struct Index {
     if (this.micMode === MicMode.VoiceRecog) {
       return '语音识别用的处理链，强调清晰度。会有约 10ms 起始延迟，建议优先用「原始」录音。';
     }
-    return '系统语音通信处理链（降噪 + 增益），嘈杂环境更干净。但会压掉静音段并延迟词首约 20ms，可能让 Win+H 等语音输入识别不出来。';
+    return '直播场景处理链（降噪 + 增益），嘈杂环境更干净。会压掉部分静音段，语音识别率可能略低于「原始」。';
   }
 
   private async ensureMicPermission(): Promise<boolean> {

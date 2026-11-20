@@ -6,7 +6,7 @@ import { Logger } from './Logger';
 /**
  * 采集模式。系统对不同 SourceType 会套用不同的音频处理链：
  *   Raw         —— 原始麦克风，最保真、零额外延迟
- *   VoiceComm   —— 系统语音通信链（AEC + NS + AGC），嘈杂环境更干净
+ *   VoiceComm   —— 直播场景链（NS + AGC），嘈杂环境更干净
  *   VoiceRecog  —— 语音识别链，强调清晰度（部分机型与 Raw 相同）
  * 具体效果由厂商 DSP 实现，不同机型差异较大，所以交给用户在界面上自选。
  */
@@ -28,12 +28,17 @@ export function micModeLabel(mode: MicMode): string {
 
 function toSourceType(mode: MicMode): audio.SourceType {
   if (mode === MicMode.Raw) {
-    return audio.SourceType.SOURCE_TYPE_MIC;
+    // UNPROCESSED 是官方给「原始数据采集」的类型（API 14+）。
+    // 比 MIC 更贴近「不做任何处理」，MIC 仍可能过一道基础优化。
+    return audio.SourceType.SOURCE_TYPE_UNPROCESSED;
   }
   if (mode === MicMode.VoiceRecog) {
     return audio.SourceType.SOURCE_TYPE_VOICE_RECOGNITION;
   }
-  return audio.SourceType.SOURCE_TYPE_VOICE_COMMUNICATION;
+  // 语音增强走 LIVE（直播场景）：带降噪但不依赖通话上下文。
+  // 不能用 VOICE_COMMUNICATION —— 那是 VoIP 专用，没建立通话场景时会直接给出全零数据，
+  // 表现为「采集器在跑、帧率正常、但麦克风输入一直静音」。
+  return audio.SourceType.SOURCE_TYPE_LIVE;
 }
 
 /**
@@ -218,10 +223,25 @@ export class AudioSender {
       sampleFormat: audio.AudioSampleFormat.SAMPLE_FORMAT_S16LE,
       encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW
     };
-    const cap: audio.AudioCapturer = await audio.createAudioCapturer({
-      streamInfo: streamInfo,
-      capturerInfo: capturerInfo
-    });
+    let cap: audio.AudioCapturer;
+    try {
+      cap = await audio.createAudioCapturer({
+        streamInfo: streamInfo,
+        capturerInfo: capturerInfo
+      });
+    } catch (err) {
+      // UNPROCESSED / LIVE 依赖设备能力，个别机型可能不支持。
+      // 回退到 MIC，宁可少一层处理也不要采不到声音。
+      const fallback: audio.AudioCapturerInfo = {
+        source: audio.SourceType.SOURCE_TYPE_MIC,
+        capturerFlags: 0
+      };
+      Logger.log('audio', `source ${capturerInfo.source} unsupported (${err}), fallback to MIC`);
+      cap = await audio.createAudioCapturer({
+        streamInfo: streamInfo,
+        capturerInfo: fallback
+      });
+    }
     this.monoInput = true;
     return cap;
   }
