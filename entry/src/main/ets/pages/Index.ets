@@ -166,12 +166,12 @@ struct Index {
 
   private modeHint(): string {
     if (this.micMode === MicMode.Raw) {
-      return '原始音频，不做任何处理。最保真，适合安静环境。';
+      return '原始音频，不做任何处理。最保真，适合安静环境和语音输入。';
     }
     if (this.micMode === MicMode.VoiceRecog) {
-      return '语音识别用的处理链，强调清晰度。部分机型与「原始」相同。';
+      return '语音识别用的处理链，强调清晰度。会有约 10ms 起始延迟，建议优先用「原始」录音。';
     }
-    return '系统语音通信处理链（降噪 + 增益），嘈杂环境更干净。效果因机型而异。';
+    return '系统语音通信处理链（降噪 + 增益），嘈杂环境更干净。但会压掉静音段并延迟词首约 20ms，可能让 Win+H 等语音输入识别不出来。';
   }
 
   private async ensureMicPermission(): Promise<boolean> {
