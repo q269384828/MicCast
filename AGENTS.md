@@ -1,0 +1,162 @@
+# MicCast 开发约定（给 AI 助手）
+
+这个文件记录**已经踩过的坑和硬性约定**。动手前先读完，别重复犯错。
+
+---
+
+## 1. 工程结构：两个平台完全独立
+
+```
+MicCast/
+├── harmony/     ← HarmonyOS 工程（DevEco Studio 打开这个目录，不是仓库根）
+├── windows/     ← WinForms 接收端（VS / dotnet 打开这个目录）
+├── tools/       ← 跨平台脚本
+└── docs/
+```
+
+- **禁止**把 HarmonyOS 的文件放回仓库根目录
+- 构建命令各自在子目录执行：
+  - HarmonyOS：`cd harmony && ./hvigorw assembleHap`
+  - Windows：`cd windows/MicCastReceiver && dotnet build -c Release`
+
+## 2. 构建 HarmonyOS HAP：签名必须手动带上
+
+`harmony/build-profile.json5` **不含签名配置**（模板文件，入库）。真实的签名在：
+
+```
+harmony/build-profile.local.json5      # 被 .gitignore 忽略，本地存在
+```
+
+**直接 `hvigorw assembleHap` 出来的 HAP 是未签名的，`hdc install` 会报 `no signature file`。**
+
+正确做法：
+
+```powershell
+cd harmony
+Copy-Item 'build-profile.json5' 'build-profile.json5.bak' -Force
+Copy-Item 'build-profile.local.json5' 'build-profile.json5' -Force
+$env:DEVECO_SDK_HOME = 'D:\Huawei\DevEco Studio 26.0.1.290\sdk'
+$env:JAVA_HOME = 'D:\Huawei\DevEco Studio 26.0.1.290\jbr'
+& .\hvigorw.bat assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+Move-Item 'build-profile.json5.bak' 'build-profile.json5' -Force
+# 产物：entry\build\default\outputs\default\entry-default-signed.hap
+```
+
+**签名密码被 DevEco 用 `.ohos/config/material/` 里的密钥加密，命令行还原不出来。** 不要试图用 `keytool` 或 `hap-sign-tool` 猜密码，浪费时间。
+
+## 3. 设备自动化：禁止硬编码坐标
+
+`hdc shell uitest` **只有坐标点击，没有选择器**：
+
+```
+click/doubleClick/longClick <x> <y>
+text <text>              # 只能往已聚焦位置输入
+```
+
+`@ohos.uitest` 的 `ON.text()` / `ON.id()` 存在，但需要编译独立测试 HAP 才能用，`hdc shell` 调不到。
+
+### 必须遵守的点击流程
+
+```
+1. uitest dumpLayout -p /data/local/tmp/x.json
+2. 从 JSON 里按 text/id 找到目标节点的 bounds，算中心点
+3. 立刻点击（不要缓存坐标、不要复用上一次 dump 的结果）
+4. 立刻再 dump 一次，验证目标状态真的变了
+5. 没变 → 重试或报告失败，不要假设成功
+```
+
+### 为什么坐标会变（实测见过 y=1156 / 1207 / 1303 三个值）
+
+| 触发因素 | 影响 |
+|---|---|
+| 运行日志面板展开 / 收起 | 下方内容整体位移 ±150px |
+| 提示文案行数变化（1 行 ↔ 3 行） | 卡片高度变，下面跟着移 |
+| 服务状态切换（未启动 / 正在串流） | Hero 区高度不同 |
+
+**曾经因为硬编码 `(564, 1306)` 连续多次点在空白处，导致「以为切了模式其实没切」，后续一整套测试数据全部作废。**
+
+## 4. 乱码：dump 出来的中文不能靠猜
+
+`hdc shell` 输出的中文在 PowerShell 里是 GBK/UTF-8 错位（`ԭʼ` = 原始，`������ǿ` = 语音增强）。**不要靠肉眼猜含义就下结论。**
+
+可靠做法：
+- 用**截图**确认 UI 状态：`hdc shell snapshot_display -f /data/local/tmp/x.jpeg` → `hdc file recv` → 看图
+- 或者用 Python 以 UTF-8 解析 `dumpLayout` 的 JSON，只输出**英文标记 + 坐标**
+
+## 5. 音频链路测试：两个必踩的假阴性
+
+**测 Win+H / ASR 识别率时，以下两种音源都无效：**
+
+1. **被测设备自己播放音频喂自己的麦克风** —— 带 AEC 的处理链会把测试音当回声消掉
+2. **PC 的 TTS 从扬声器播放** —— `TextInputHost`（Win+H 宿主）加载了 `xaudio2_9.dll`（纯播放 API），会拿系统渲染流做 AEC 参考，把电脑自己放出来的声音判成回声
+
+**正确做法：用另一台设备（另一部手机 / 音箱）循环播放。**
+
+排查 Win+H 是否在做 AEC：
+
+```powershell
+Get-Process TextInputHost | Select-Object -ExpandProperty Modules |
+  Where-Object ModuleName -match 'xaudio2|audio'
+```
+
+## 6. HarmonyOS SourceType 的坑
+
+**`SOURCE_TYPE_VOICE_COMMUNICATION` 是 VoIP 专用，禁止用于本项目的录音场景。**
+
+未建立通话音频场景时它**持续返回全零数据**。表象极具迷惑性：采集器正常运行、帧率 207/s、`sendErr=0`、`readData` 持续回调，但麦克风输入一直是静音。
+
+华为官方「录音无声排查」文档点名了这个误用。当前只用两档：
+
+| 模式 | SourceType |
+|---|---|
+| 原始 | `SOURCE_TYPE_UNPROCESSED`（API 14+，不支持时回退 `MIC`） |
+| 识别优先 | `SOURCE_TYPE_VOICE_RECOGNITION` |
+
+**长时任务**：`BackgroundTaskGuard` 申请 `AUDIO_RECORDING`，必须在**前台**启动录音后再申请。实测息屏 25 秒帧率稳定 196→202，丢包 0.00%，无断流。
+
+## 7. 往手机传文件：App 读不到 `/data/local/tmp`
+
+`hdc file send` 到 `/data/local/tmp` 只有 shell 可读，媒体 App 拿不到内容（表现为能显示文件名，但 `totaltime` 恒为 `00:00`、点播放报「未找到文件」）。
+
+要让播放器真正加载：
+
+```
+# 1. 推到 file_manager 组可写的公共目录
+hdc file send <local> /storage/media/100/local/files/Docs/Download/<name>
+
+# 2. 用 docs URI 打开（不是 file:///storage/...）
+hdc shell aa start -b com.huawei.hmsapp.music -a MainAbility \
+  -U file://docs/storage/Users/currentUser/Download/<name> -t audio/mpeg
+```
+
+**hdc 推入的文件不会进 HarmonyOS 媒体库索引**（`mediatool query` 返回 0 结果），但上面的 docs URI 能让播放器直接读。
+
+另外 `hdc shell` 用户在 `file_manager` 组（`uid=2000(shell) groups=...1006(file_manager)...`），但 `chmod` 改不动文件权限（非 owner）。
+
+## 8. 上下文隔离：不要用模拟按键测 Win+H
+
+`keybd_event` 模拟 Win+H 面板能弹出，但**焦点窗口不可控**，识别结果插到哪儿无法保证。需要在文本框里接收结果时，用一个独立的 WinForms 窗口 + `TextChanged` 实时写文件，别指望记事本（Win11 记事本多标签，`SetForegroundWindow` 到旧句柄会切错标签）。
+
+另外这个环境的 `Stop-Process` 有包装限制，对动态 PID 会报 `must specify at least one process using -Id`。**改用 `$proc.Kill()`。**
+
+## 9. 构建缓存不要入库
+
+- 根目录和 `harmony/` 下的 `.hvigor/` 都是构建缓存，必须 gitignore
+- `git rm --cached` 前**先确认 .gitignore 已包含该路径**，否则 `git add -A` 会把它加回来
+- 提交前用 `git ls-files | Select-String hvigor` 检查
+
+## 10. `record-cable.ps1` 会忽略 -OutputPath
+
+脚本实际输出到 `$env:TEMP\miccast-<HHmmss>.wav`，`-OutputPath` 参数当前不生效。要拿录音文件时，去 TEMP 找最新的 `miccast-*.wav`。
+
+---
+
+## 验证优先于猜测
+
+这个项目已经因为「不验证就下结论」浪费过多轮时间：
+
+- 用 TTS 测 Win+H → 错误结论「引擎缺失」（实际引擎完好，`zh-CN-N` 模型在 `C:\Windows\Speech_OneCore\Engines\SR\`）
+- 硬编码坐标点空 → 错误结论「语音增强能识别」
+- 猜乱码含义 → 错误结论「切到了语音增强」
+
+**任何关于设备状态、UI 状态、音频电平的判断，都要有可复现的证据（截图 / 日志 / 电平测量），不要靠推理链。**
