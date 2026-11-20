@@ -13,6 +13,7 @@
 # 构建日志与临时文件
 build*.log
 /tools/*.log
+/windows/*.log
 
 # 签名材料（千万不要入库）
 /entry/build/default/outputs/**/*.p7b
