@@ -113,15 +113,52 @@ devecocli run --skip-build --module entry --device <手机IP:端口> --ability E
 
 ## 电脑端
 
-见 [windows/README.md](windows/README.md)。要点：
+要点：
 
 1. 界面为自绘现代风格（深浅色跟随系统，Windows 11 圆角 + 深色标题栏）
-2. **图形界面单例**：重复启动不会开第二个窗口，只会把已有窗口切到前台（`--help` / `--discover` / `--list-devices` 等控制台模式不受限制）
+2. **图形界面单例**：重复启动不会开第二个窗口，只会把已有窗口切到前台（`--headless` / `--help` / `--discover` 等控制台模式不受限制）
 3. **缺少 VB-CABLE 时顶部会有引导卡片，可一键下载并静默安装**
 4. 运行 `MicCastReceiver.exe`，手机列表自动出现，选中 → 输出设备选 `CABLE Input` → 开始接收
 5. **断线自动重连**：手机端停止服务或网络中断时，状态立刻变成「重连中…」，每 2 秒重试一次，
    手机重新点「启动麦克风服务」后会自动连回来；想放弃就点「取消重连」
 6. 会议软件 / Win+H 的麦克风选 `CABLE Output`，或 `Set-DefaultMic.ps1 -Name 'CABLE Output'` 设为默认
+
+### 无头模式（不开窗口）
+
+不想每次点界面，或者要开机自启 / 写脚本时用 `--headless`：
+
+```powershell
+# 直连指定手机，Ctrl+C 退出
+MicCastReceiver.exe --headless --ip 192.168.3.168
+
+# 不给 IP，自动发现（默认等 30 秒，可用 --discover-timeout 调长）
+MicCastReceiver.exe --headless
+
+# 跑 30 秒自动退出，只输出连接/断开等关键事件
+MicCastReceiver.exe --headless --duration 30 --quiet
+```
+
+运行中每秒打印一行，字段名固定，方便脚本取用：
+
+```
+STATS fps=200 kbps=255 loss=0.00% buf=35ms target=30ms jitter=5.2ms
+      underrun=120ms underrunDelta=0ms dropped=0ms rate=1.001x
+```
+
+判断音质只看两个字段：
+
+- `loss` —— UDP 层真实丢包率，由 `StreamData.tick` 跳号推断。**不为 0 说明网络在丢包**
+- `underrunDelta` —— 这一秒新产生的欠载毫秒数。**持续为 0 才说明音频是连续的**
+
+这两者含义完全不同：丢包靠 FEC / 重传解决，欠载要靠调缓冲水位。混为一谈会优化错方向。
+
+其他控制台子命令：
+
+```powershell
+MicCastReceiver.exe --list-devices        # 列出播放设备索引
+MicCastReceiver.exe --discover 6          # 扫描局域网手机后退出
+MicCastReceiver.exe --help                # 完整参数说明
+```
 
 ## 目录结构
 
@@ -155,19 +192,19 @@ MicCast/
 │   │   ├── VbCable.cs                    # VB-CABLE 检测 + 一键下载安装
 │   │   ├── SingleInstance.cs             # 图形界面单例（命名互斥量 + 激活已有窗口）
 │   │   ├── MainForm.cs                   # 主界面与布局
-│   │   ├── Program.cs                    # 命令行
+│   │   ├── Program.cs                    # 命令行入口（GUI / --headless / --discover / --list-devices）
 │   │   └── Ui/                           # 自绘控件（零第三方 UI 库）
 │   │       ├── Theme.cs                  # 深浅色配色 + 圆角绘制
 │   │       ├── Card.cs / ModernButton.cs / DropDown.cs
 │   │       ├── TextField.cs / StatusPill.cs / LevelMeter.cs
 │   │       └── NativeFx.cs               # Win11 圆角 + 深色标题栏
 │   ├── Set-DefaultMic.ps1                # 切换系统默认录音设备
-│   └── README.md
 ├── docs/icon-preview.png                 # 图标多尺寸预览（由脚本生成）
 └── tools/
     ├── make-icon.py                      # 生成全平台图标（可复现）
     ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
     ├── lan-scan.js                       # 扫描局域网里的 hdc 调试端口
+    ├── check-continuity.ps1              # 录 CABLE Output 逐帧扫空洞，验证音频连续性
     └── install.ps1                       # 构建 + 装机 + 抓日志
 ```
 

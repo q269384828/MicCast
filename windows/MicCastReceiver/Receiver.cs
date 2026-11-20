@@ -42,6 +42,10 @@ public sealed class Receiver : IDisposable
     public double UnderrunMs => _player.UnderrunMilliseconds;
     public double PlaybackRate => _player.PlaybackRate;
     public double AveragePlaybackRate => _player.AveragePlaybackRate;
+    /// <summary>UDP 层面的丢包率（%，由 StreamData.tick 跳号推断）</summary>
+    public double LossPercent => _player.LossPercent;
+    public long LostFrames => _player.LostFrames;
+    public long OutOfOrderCount => _player.OutOfOrderCount;
     public string DeviceName => _player.LastDeviceName;
 
     public LatencyProfile Profile

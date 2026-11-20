@@ -47,6 +47,9 @@ public sealed class JitterBuffer : IWaveProvider
     private double _rate = 1.0;
     private double _rateSum;
     private long _rateSamples;
+    private long _lostFrames;
+    private long _expectedFrames;
+    private long _outOfOrder;
 
     public WaveFormat WaveFormat { get; }
 
@@ -79,6 +82,14 @@ public sealed class JitterBuffer : IWaveProvider
     /// <summary>平均播放速率，1.0 表示与实时同步</summary>
     public double AverageRate => _rateSamples > 0 ? _rateSum / _rateSamples : 1.0;
 
+    /// <summary>tick 跳号推断出的丢帧总数（UDP 层面真的没到）</summary>
+    public long LostFrames => _lostFrames;
+    /// <summary>网络丢包率（百分比），丢帧 / 应到帧</summary>
+    public double LossPercent =>
+        _expectedFrames > 0 ? _lostFrames * 100.0 / _expectedFrames : 0;
+    /// <summary>乱序或重传的旧包次数，不算丢包</summary>
+    public long OutOfOrderCount => _outOfOrder;
+
     public double BufferedMilliseconds
     {
         get { lock (_gate) return _filledFrames / _framesPerMs; }
@@ -104,11 +115,27 @@ public sealed class JitterBuffer : IWaveProvider
     {
         if (_lastArrivalMs > 0 && _lastTick >= 0 && tick > _lastTick)
         {
+            // tick 跳号说明中间那些 UDP 包没到 —— 这是网络丢包，不是本地调度问题。
+            // 两者都会表现为欠载，但只有丢包才需要 FEC / 重传。
+            long gap = tick - _lastTick - 1;
+            if (gap > 0)
+            {
+                _lostFrames += gap;
+            }
+            _expectedFrames += tick - _lastTick;
+
             double expectedMs = (tick - _lastTick) * Protocol.FrameMs;
             double actualMs = nowMs - _lastArrivalMs;
             double deviation = Math.Abs(actualMs - expectedMs);
             // RFC 3550 的指数平滑，收敛快又不会被单个尖刺带跑
             _jitterMs += (deviation - _jitterMs) / 16.0;
+        }
+        else if (_lastTick >= 0 && tick <= _lastTick)
+        {
+            // 乱序或重传的旧包：只计一次，不参与抖动和丢包统计
+            _outOfOrder++;
+            _lastArrivalMs = nowMs;
+            return;
         }
         _lastArrivalMs = nowMs;
         _lastTick = tick;
@@ -120,8 +147,11 @@ public sealed class JitterBuffer : IWaveProvider
             _minTargetMs + _underrunPenaltyMs + 3.0 * _jitterMs,
             _minTargetMs, _maxTargetMs);
 
-        // 欠载惩罚缓慢衰减：真断续过就保守一阵子，网络稳了再慢慢降回来
-        _underrunPenaltyMs = Math.Max(0, _underrunPenaltyMs - 0.05);
+        // 欠载惩罚缓慢衰减：真断续过就保守一阵子，网络稳了再慢慢降回来。
+        // 衰减速率必须小于「欠载发生时惩罚增长速度」，否则水位永远回落到欠载区。
+        // UpdateJitter 每个音频包调用一次（约 200 次/秒），0.02 → 每秒衰减 4ms；
+        // 而每秒只要欠载 1 次就是 +5ms，所以水位会被推高到真正不再欠载的位置。
+        _underrunPenaltyMs = Math.Max(0, _underrunPenaltyMs - 0.02);
 
         if (desired > _targetMs)
         {
@@ -187,21 +217,30 @@ public sealed class JitterBuffer : IWaveProvider
             int produced = 0;
             for (; produced < outFrames; produced++)
             {
-                if (_filledFrames < 2) break;
+                if (_filledFrames < 1) break;
 
-                int srcA = _readFrame * _blockAlign;
-                int srcB = ((_readFrame + 1) % _capacityFrames) * _blockAlign;
-                double t = _readFrac;
                 int dst = offset + produced * _blockAlign;
 
-                // 逐采样线性插值（16bit）
-                for (int b = 0; b + 1 < _blockAlign; b += 2)
+                if (_filledFrames >= 2)
                 {
-                    short s0 = (short)(_ring[srcA + b] | (_ring[srcA + b + 1] << 8));
-                    short s1 = (short)(_ring[srcB + b] | (_ring[srcB + b + 1] << 8));
-                    short v = (short)(s0 + (s1 - s0) * t);
-                    buffer[dst + b] = (byte)(v & 0xFF);
-                    buffer[dst + b + 1] = (byte)((v >> 8) & 0xFF);
+                    // 正常路径：相邻两帧之间线性插值
+                    int srcA = _readFrame * _blockAlign;
+                    int srcB = ((_readFrame + 1) % _capacityFrames) * _blockAlign;
+                    double t = _readFrac;
+                    for (int b = 0; b + 1 < _blockAlign; b += 2)
+                    {
+                        short s0 = (short)(_ring[srcA + b] | (_ring[srcA + b + 1] << 8));
+                        short s1 = (short)(_ring[srcB + b] | (_ring[srcB + b + 1] << 8));
+                        short v = (short)(s0 + (s1 - s0) * t);
+                        buffer[dst + b] = (byte)(v & 0xFF);
+                        buffer[dst + b + 1] = (byte)((v >> 8) & 0xFF);
+                    }
+                }
+                else
+                {
+                    // 只剩一帧、没有下一帧可插值：直接输出这一帧。
+                    // 之前这里会整段补静音，白扔掉最后 5ms 的音频。
+                    Buffer.BlockCopy(_ring, _readFrame * _blockAlign, buffer, dst, _blockAlign);
                 }
 
                 _readFrac += _rate;
@@ -219,8 +258,10 @@ public sealed class JitterBuffer : IWaveProvider
                 Array.Clear(buffer, offset + produced * _blockAlign, gapBytes);
                 _underruns++;
                 _underrunBytes += gapBytes;
-                // 记录一次欠载就抬高目标水位，下一帧起生效
-                _underrunPenaltyMs = Math.Min(80, _underrunPenaltyMs + 3);
+                // 一次欠载就抬高目标水位，下一帧起生效。
+                // 单次欠载通常丢掉 5ms 音频，但增长要温和 —— 否则启动瞬态那几次欠载
+                // 会一口气把水位推到上限，延迟暴涨后再慢慢回落，来回振荡。
+                _underrunPenaltyMs = Math.Min(60, _underrunPenaltyMs + 3);
             }
 
             return count;
@@ -266,6 +307,9 @@ public sealed class JitterBuffer : IWaveProvider
             _rate = 1.0;
             _rateSum = 0;
             _rateSamples = 0;
+            _lostFrames = 0;
+            _expectedFrames = 0;
+            _outOfOrder = 0;
         }
     }
 }

@@ -84,8 +84,10 @@ public sealed class AudioPlayer : IDisposable
             }
 
             _output.Init(_buffer);
-            // 先垫一段静音，避免播放起步瞬间连续欠载
-            _buffer.PrimeSilence(p.MinTarget + p.WasapiLatency);
+            // 先垫一段静音，避免播放起步瞬间连续欠载。
+            // 多垫 30ms：WASAPI 一启动就会连着读好几次，而手机端第一批包还在路上，
+            // 垫不够就会在启动阶段积一堆欠载，把自适应水位顶到上限。
+            _buffer.PrimeSilence(p.MinTarget + p.WasapiLatency + 30);
             _output.Play();
             LastDeviceName = deviceName ?? "默认设备";
             SampleRate = sampleRate;
@@ -119,6 +121,9 @@ public sealed class AudioPlayer : IDisposable
     public double UnderrunMilliseconds => _buffer?.UnderrunMilliseconds ?? 0;
     public double PlaybackRate => _buffer?.CurrentRate ?? 1.0;
     public double AveragePlaybackRate => _buffer?.AverageRate ?? 1.0;
+    public double LossPercent => _buffer?.LossPercent ?? 0;
+    public long LostFrames => _buffer?.LostFrames ?? 0;
+    public long OutOfOrderCount => _buffer?.OutOfOrderCount ?? 0;
 
     private static float ComputeRms(byte[] pcm)
     {

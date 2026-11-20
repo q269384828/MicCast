@@ -186,6 +186,9 @@ export class AudioSender {
     this.framesSent = 0;
     this.bytesSent = 0;
     this.level = 0;
+    // 每次完整启动都重置「已串流」计时；否则停止再启动会显示累计时间，看着像没停过。
+    // 切换采集模式走的是 setMode→startCapturer，不经过这里，所以不会误重置。
+    this.startedAt = 0;
 
     const udp: socket.UDPSocket = socket.constructUDPSocketInstance();
     // 官方实现「双方各绑本地 59100」：服务端也要从 59100 发出，客户端按源端口过滤
