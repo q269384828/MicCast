@@ -155,6 +155,8 @@ MicCast/
 | 控制 | TCP 59100 | varint 长度前缀的 delimited protobuf |
 | 音频 | UDP 59100 | 每个数据报 = 裸 `StreamData`（无信封） |
 
+**音频参数**：16kHz / 16bit / 单声道，每帧 5ms（160 字节）。由手机端在 `ServerAudioConfigResponse` 中下发。
+
 **服务端握手顺序**：TCP accept → 发 `ProtoServerConfig` → 收 `ProtoClientConfig` → 发 `ProtoFeatures` → 推流。
 
 ### 协议设计上踩过的三个坑

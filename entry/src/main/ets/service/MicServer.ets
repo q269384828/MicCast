@@ -44,6 +44,8 @@ export class MicServer {
   deviceName: string = 'HarmonyOS Phone';
   /** 本机在局域网里的 IPv4，供电脑端手动输入时参考 */
   localIp: string = '';
+  /** 本机 IPv4 的前缀长度（掩码位数），用于正确算出子网广播地址 */
+  localPrefixLength: number = 24;
   lastError: string = '';
 
   private tcpServer: socket.TCPSocketServer | undefined = undefined;
@@ -154,7 +156,7 @@ export class MicServer {
     });
   }
 
-  /** 取本机第一个 IPv4，既用于界面展示，也用于推断定向广播地址 */
+  /** 取本机第一个 IPv4，同时记下它的前缀长度（掩码位数） */
   private detectLocalIp(): string {
     try {
       const net: connection.NetHandle = connection.getDefaultNetSync();
@@ -166,6 +168,10 @@ export class MicServer {
         const link: connection.LinkAddress = props.linkAddresses[i];
         const addr: string = link.address.address;
         if (addr.indexOf('.') > 0 && addr.indexOf(':') < 0) {
+          const prefix: number = link.prefixLength;
+          if (prefix > 0 && prefix <= 32) {
+            this.localPrefixLength = prefix;
+          }
           return addr;
         }
       }
@@ -175,7 +181,10 @@ export class MicServer {
     return '';
   }
 
-  /** 由本机 IPv4 推断 /24 定向广播地址，提高被发现概率 */
+  /**
+   * 按本机 IP + 真实掩码算出子网定向广播地址。
+   * 不能假设 /24 —— 路由器可能是 /16、/22 等，算错就等于没发广播。
+   */
   private subnetBroadcast(): string {
     const addr: string = this.localIp.length > 0 ? this.localIp : this.detectLocalIp();
     if (addr.length === 0) {
@@ -185,7 +194,27 @@ export class MicServer {
     if (parts.length !== 4) {
       return '';
     }
-    return `${parts[0]}.${parts[1]}.${parts[2]}.255`;
+
+    const o0: number = Number.parseInt(parts[0], 10);
+    const o1: number = Number.parseInt(parts[1], 10);
+    const o2: number = Number.parseInt(parts[2], 10);
+    const o3: number = Number.parseInt(parts[3], 10);
+    if (Number.isNaN(o0) || Number.isNaN(o1) || Number.isNaN(o2) || Number.isNaN(o3)) {
+      return '';
+    }
+
+    const prefix: number = this.localPrefixLength > 0 && this.localPrefixLength <= 32
+      ? this.localPrefixLength : 24;
+    // /31 是点对点链路，/32 是单机，都没有广播地址
+    if (prefix >= 31) {
+      return '';
+    }
+
+    const ip: number = ((o0 << 24) | (o1 << 16) | (o2 << 8) | o3) >>> 0;
+    const mask: number = prefix === 0 ? 0 : ((0xFFFFFFFF << (32 - prefix)) >>> 0);
+    const bcast: number = ((ip & mask) | (~mask >>> 0)) >>> 0;
+
+    return `${(bcast >>> 24) & 0xFF}.${(bcast >>> 16) & 0xFF}.${(bcast >>> 8) & 0xFF}.${bcast & 0xFF}`;
   }
 
   private onClientConnected(conn: socket.TCPSocketConnection): void {

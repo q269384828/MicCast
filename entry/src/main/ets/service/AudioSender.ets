@@ -104,59 +104,34 @@ export class AudioSender {
     } catch (err) {
       Logger.log('audio', `getBufferSize failed: ${err}`);
     }
-    Logger.log('audio', `capture started (${this.monoInput ? 'mono→stereo' : 'stereo'}) bufSize=${bufSize} → ${ip}:${AUDIO_PORT}`);
+    Logger.log('audio', `capture started (16kHz mono) bufSize=${bufSize} → ${ip}:${AUDIO_PORT}`);
   }
 
   private async createCapturer(): Promise<audio.AudioCapturer> {
-    const stereoInfo: audio.AudioStreamInfo = {
-      samplingRate: audio.AudioSamplingRate.SAMPLE_RATE_48000,
-      channels: audio.AudioChannel.CHANNEL_2,
-      sampleFormat: audio.AudioSampleFormat.SAMPLE_FORMAT_S16LE,
-      encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW
-    };
     const capturerInfo: audio.AudioCapturerInfo = {
       source: audio.SourceType.SOURCE_TYPE_MIC,
       capturerFlags: 0
     };
-    const stereoOptions: audio.AudioCapturerOptions = {
-      streamInfo: stereoInfo,
-      capturerInfo: capturerInfo
-    };
-    try {
-      const cap: audio.AudioCapturer = await audio.createAudioCapturer(stereoOptions);
-      this.monoInput = false;
-      return cap;
-    } catch (err) {
-      Logger.log('audio', `stereo capture unavailable (${err}), fallback to mono`);
-    }
-    const monoInfo: audio.AudioStreamInfo = {
-      samplingRate: audio.AudioSamplingRate.SAMPLE_RATE_48000,
+    // 固定 16kHz 单声道：麦克风通话够用，带宽只有 48kHz 立体声的 1/6。
+    // 不做采样率回退 —— 回退会让实际数据与协议声明不符，对端会变调。
+    const streamInfo: audio.AudioStreamInfo = {
+      samplingRate: audio.AudioSamplingRate.SAMPLE_RATE_16000,
       channels: audio.AudioChannel.CHANNEL_1,
       sampleFormat: audio.AudioSampleFormat.SAMPLE_FORMAT_S16LE,
       encodingType: audio.AudioEncodingType.ENCODING_TYPE_RAW
     };
-    const monoOptions: audio.AudioCapturerOptions = {
-      streamInfo: monoInfo,
+    const cap: audio.AudioCapturer = await audio.createAudioCapturer({
+      streamInfo: streamInfo,
       capturerInfo: capturerInfo
-    };
-    const capMono: audio.AudioCapturer = await audio.createAudioCapturer(monoOptions);
+    });
     this.monoInput = true;
-    return capMono;
+    return cap;
   }
 
   private onPcm(chunk: Uint8Array): void {
-    if (this.monoInput) {
-      // 单声道 16bit → 复制成双声道，保证对端按 2ch 解析
-      for (let i = 0; i + 1 < chunk.length; i += 2) {
-        this.pending.push(chunk[i]);
-        this.pending.push(chunk[i + 1]);
-        this.pending.push(chunk[i]);
-        this.pending.push(chunk[i + 1]);
-      }
-    } else {
-      for (let i = 0; i < chunk.length; i++) {
-        this.pending.push(chunk[i]);
-      }
+    // 采集就是 16kHz 单声道，与协议声明一致，直接入队即可（不再复制成双声道）
+    for (let i = 0; i < chunk.length; i++) {
+      this.pending.push(chunk[i]);
     }
     while (this.pending.length >= FRAME_BYTES) {
       const frame: Uint8Array = new Uint8Array(FRAME_BYTES);

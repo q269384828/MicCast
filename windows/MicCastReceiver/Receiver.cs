@@ -17,6 +17,10 @@ public sealed class Receiver : IDisposable
     private readonly List<byte> _rx = new();
     private readonly Stopwatch _sinceLastRate = Stopwatch.StartNew();
     private long _framesAtLastRate;
+    private long _bytesAtLastRate;
+    private int _deviceIndex = -1;
+    private bool _playerStarted;
+    private readonly object _playerGate = new();
 
     public string PhoneIp { get; private set; } = string.Empty;
     public string ServerName { get; private set; } = string.Empty;
@@ -34,6 +38,8 @@ public sealed class Receiver : IDisposable
     public double DroppedMs => _player.DroppedMilliseconds;
     public long UnderrunCount => _player.UnderrunCount;
     public double UnderrunMs => _player.UnderrunMilliseconds;
+    public double PlaybackRate => _player.PlaybackRate;
+    public double AveragePlaybackRate => _player.AveragePlaybackRate;
     public string DeviceName => _player.LastDeviceName;
 
     public LatencyProfile Profile
@@ -57,11 +63,13 @@ public sealed class Receiver : IDisposable
         Frames = 0;
         Bytes = 0;
         _rx.Clear();
+        _deviceIndex = deviceIndex;
+        _playerStarted = false;
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
-        _player.Start(deviceIndex);
-        Emit($"播放设备: {_player.LastDeviceName}");
+        // 播放器延后到收到 ServerAudioConfigResponse 再启动 —— 采样率/声道数以服务端为准。
+        // 同时起一个兜底定时器，万一对端没下发配置也不至于一直没声音。
 
         // UDP 先绑定，避免握手完成后手机立刻推流而丢前几帧
         try
@@ -98,6 +106,7 @@ public sealed class Receiver : IDisposable
 
         _ = Task.Run(() => ReadLoopAsync(token), token);
         _ = Task.Run(() => UdpLoopAsync(token), token);
+        _ = Task.Run(() => StartPlayerFallbackAsync(token), token);
         _ = Task.Run(() => RateLoopAsync(token), token);
     }
 
@@ -153,7 +162,27 @@ public sealed class Receiver : IDisposable
                         }
                         else if (kind == 24)
                         {
-                            Emit("已收到服务端音频配置");
+                            // ServerAudioConfigResponse: field 1 = {1: sampleRate, 2: bits, 3: channels}
+                            int rate = 0, bits = 0, ch = 0;
+                            var conf = Pb.ReadFields(fields[0].Bytes ?? Array.Empty<byte>());
+                            var inner = conf.FirstOrDefault(f => f.Number == 1 && f.Bytes != null);
+                            if (inner?.Bytes != null)
+                            {
+                                var c = Pb.ReadFields(inner.Bytes);
+                                rate = (int)Pb.GetVarint(c, 1);
+                                bits = (int)Pb.GetVarint(c, 2);
+                                ch = (int)Pb.GetVarint(c, 3);
+                            }
+                            if (rate > 0 && bits > 0 && ch > 0)
+                            {
+                                Emit($"服务端音频配置: {rate}Hz / {bits}bit / {ch}ch");
+                                StartPlayer(rate, bits, ch);
+                            }
+                            else
+                            {
+                                Emit("服务端音频配置解析失败，沿用默认参数");
+                                StartPlayer(Protocol.SampleRate, Protocol.Bits, Protocol.Channels);
+                            }
                         }
                     }
                 }
@@ -198,6 +227,13 @@ public sealed class Receiver : IDisposable
                 if (!result.RemoteEndPoint.Address.Equals(IPAddress.Parse(PhoneIp))) continue;
                 var data = Protocol.ParseStreamData(result.Buffer);
                 if (data is null) continue;
+
+                // 收到音频但播放器还没起（配置包丢了），立刻按默认参数起播，别一直静音
+                if (!_playerStarted)
+                {
+                    StartPlayer(Protocol.SampleRate, Protocol.Bits, Protocol.Channels);
+                }
+
                 Frames++;
                 Bytes += data.Payload.Length;
                 _player.Write(data.Payload, data.Tick);
@@ -211,6 +247,44 @@ public sealed class Receiver : IDisposable
         }
     }
 
+    /// <summary>启动播放器（幂等）。参数以服务端下发为准，避免变调。</summary>
+    private void StartPlayer(int sampleRate, int bits, int channels)
+    {
+        lock (_playerGate)
+        {
+            if (_playerStarted) return;
+            _playerStarted = true;
+            try
+            {
+                _player.Start(_deviceIndex, sampleRate, bits, channels);
+                Emit($"播放设备: {_player.LastDeviceName}（{sampleRate}Hz/{bits}bit/{channels}ch）");
+            }
+            catch (Exception ex)
+            {
+                LastError = $"启动播放失败: {ex.Message}";
+                Emit(LastError);
+            }
+        }
+    }
+
+    /// <summary>对端没下发音频配置时的兜底，1.5 秒后按默认参数起播，避免一直没声音。</summary>
+    private async Task StartPlayerFallbackAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(1500, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (!_playerStarted)
+        {
+            Emit("未收到服务端音频配置，按默认参数起播");
+            StartPlayer(Protocol.SampleRate, Protocol.Bits, Protocol.Channels);
+        }
+    }
+
     private async Task RateLoopAsync(CancellationToken token)
     {
         try
@@ -220,11 +294,14 @@ public sealed class Receiver : IDisposable
                 await Task.Delay(500, token);
                 var elapsed = _sinceLastRate.Elapsed.TotalSeconds;
                 long deltaFrames = Frames - _framesAtLastRate;
+                long deltaBytes = Bytes - _bytesAtLastRate;
                 _framesAtLastRate = Frames;
+                _bytesAtLastRate = Bytes;
                 if (elapsed > 0.05)
                 {
                     Fps = deltaFrames / elapsed;
-                    Kbps = deltaFrames * 960 * 8 / 1000.0 / elapsed;
+                    // 按实际收到的载荷字节算，不要假设每帧多少字节（采样率/声道数会变）
+                    Kbps = deltaBytes * 8 / 1000.0 / elapsed;
                 }
                 _sinceLastRate.Restart();
             }
@@ -241,6 +318,10 @@ public sealed class Receiver : IDisposable
         _stream = null;
         _tcp = null;
         _udp = null;
+        lock (_playerGate)
+        {
+            _playerStarted = false;
+        }
         _player.Stop();
         Fps = 0;
         Kbps = 0;

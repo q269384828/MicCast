@@ -18,15 +18,17 @@ export const CLIENT_VERSION: string = '1.0.0';
 /** 作为服务端时对外声称的版本，桌面端要求 >= 0.7.0 */
 export const SERVER_VERSION: string = '0.27.5';
 
-export const SAMPLE_RATE: number = 48000;
-export const BITS: number = 16;
-export const CHANNELS: number = 2;
 /**
- * 帧长 5ms：48000 * 0.005 * 2ch * 2byte = 960 字节。
- * 必须让整个 UDP 数据报（含 protobuf 头 ~985 字节）小于 MTU 1472，
- * 否则会被 IP 分片，任一分片丢失整帧就废了。
+ * 麦克风通话不需要 48kHz 立体声 —— 人声频带只有 50~7000Hz。
+ * 16kHz 单声道 16bit = 256 kbps，比原来 48kHz 立体声（1536 kbps）降 6 倍，
+ * 而且不增加任何延迟和 CPU 开销。实际值以服务端下发的 audio config 为准。
  */
-export const FRAME_BYTES: number = 960;
+export const SAMPLE_RATE: number = 16000;
+export const BITS: number = 16;
+export const CHANNELS: number = 1;
+/** 5ms 一帧：16000 * 0.005 * 1ch * 2byte = 160 字节。
+ *  必须让整个 UDP 数据报小于 MTU 1472，否则会被 IP 分片，任一分片丢失整帧就废了。 */
+export const FRAME_BYTES: number = 160;
 export const FRAME_MS: number = 5;
 
 export class ServerInfo {

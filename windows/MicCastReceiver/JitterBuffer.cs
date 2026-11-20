@@ -4,29 +4,34 @@ using NAudio.Wave;
 namespace MicCastReceiver;
 
 /// <summary>
-/// 自适应抖动缓冲。
+/// 自适应抖动缓冲 + 变速追平（NetEq 思路的轻量实现）。
 ///
-/// 普通的 BufferedWaveProvider 只有一个固定容量，一旦生产快于消费就会一路积压到溢出，
-/// 表现出「延迟越来越大直到爆音」。这里改成按到达抖动动态设定目标水位：
-///   - 抖动大 → 抬高目标，多存一点，避免断续
-///   - 抖动小 → 压低目标，把延迟降下来
-///   - 积压超过目标 + 迟滞阈值 → 主动丢弃多余数据快速追平
+/// 关键点：追平**不丢弃**音频，而是微调播放速率（±6% 以内）。
+///   缓冲偏多 → 播快一点点，几秒内自然追回
+///   缓冲偏少 → 播慢一点点，把量攒回来
+///   速率变化 &lt;6%，音调偏移人耳基本无感（语音尤其如此）
+///
+/// 只有缓冲真的溢出/见底时才做硬处理（丢最旧的 / 补静音），那是兜底而非常规手段。
 /// </summary>
 public sealed class JitterBuffer : IWaveProvider
 {
     private readonly object _gate = new();
     private readonly byte[] _ring;
     private readonly int _blockAlign;
-    private readonly double _bytesPerMs;
+    private readonly double _framesPerMs;
+    private readonly int _capacityFrames;
     private readonly int _minTargetMs;
     private readonly int _maxTargetMs;
-    private readonly int _hysteresisBytes;
-    /// <summary>下游一次 Read 的字节数。追平必须给它留位置，否则刚追平就被读空。</summary>
-    private readonly int _readChunkBytes;
 
-    private int _readPos;
-    private int _writePos;
-    private int _filled;
+    /// <summary>最大速率偏移。6% 时音调变化不到一个半音，语音听不出来。</summary>
+    private const double MaxRateDeviation = 0.06;
+    /// <summary>水位偏差多少毫秒时达到最大速率偏移</summary>
+    private const double RateFullScaleMs = 100.0;
+
+    private int _writeFrame;
+    private int _readFrame;
+    private double _readFrac;
+    private int _filledFrames;
 
     private double _lastArrivalMs;
     private long _lastTick = -1;
@@ -34,61 +39,54 @@ public sealed class JitterBuffer : IWaveProvider
     private int _frameCount;
     private int _targetMs;
 
-    private long _catchUps;
+    private long _overflows;
     private double _droppedMs;
     private long _underruns;
-    private double _underrunPenaltyMs;
     private long _underrunBytes;
+    private double _underrunPenaltyMs;
+    private double _rate = 1.0;
+    private double _rateSum;
+    private long _rateSamples;
 
     public WaveFormat WaveFormat { get; }
 
-    /// <param name="minTargetMs">目标水位下限（指一次 Read 之后应该剩下的量）</param>
-    /// <param name="maxTargetMs">目标水位上限，网络再差也不无限涨</param>
-    /// <param name="capacityMs">环形缓冲区总容量</param>
-    /// <param name="catchUpHysteresisMs">超过目标多少才追平，防止来回抖</param>
-    /// <param name="readChunkMs">下游一次读走多少毫秒（= WasapiOut 的 latency）</param>
     public JitterBuffer(WaveFormat format, int minTargetMs = 20, int maxTargetMs = 120,
-                        int capacityMs = 500, int catchUpHysteresisMs = 8, int readChunkMs = 20)
+                        int capacityMs = 500)
     {
         WaveFormat = format;
         _blockAlign = format.BlockAlign;
-        _bytesPerMs = format.AverageBytesPerSecond / 1000.0;
+        _framesPerMs = format.SampleRate / 1000.0;
         _minTargetMs = minTargetMs;
         _maxTargetMs = maxTargetMs;
         _targetMs = minTargetMs;
-        _hysteresisBytes = (int)(catchUpHysteresisMs * _bytesPerMs);
-        _readChunkBytes = (int)(readChunkMs * _bytesPerMs);
 
-        int capacity = (int)(capacityMs * _bytesPerMs);
-        capacity -= capacity % _blockAlign;
-        _ring = new byte[Math.Max(capacity, _blockAlign * 8)];
+        int capacityFrames = (int)(capacityMs * _framesPerMs);
+        _capacityFrames = Math.Max(capacityFrames, 64);
+        _ring = new byte[_capacityFrames * _blockAlign];
     }
 
     public int TargetMilliseconds => _targetMs;
     public double JitterMilliseconds => _jitterMs;
-    public long CatchUpCount => _catchUps;
+    /// <summary>缓冲溢出导致的硬丢弃次数（正常情况下应接近 0）</summary>
+    public long CatchUpCount => _overflows;
     public double DroppedMilliseconds => _droppedMs;
     public long UnderrunCount => _underruns;
-    /// <summary>累计欠载时长（毫秒）。判断断续严重程度看这个，光看次数会高估。</summary>
-    public double UnderrunMilliseconds => _underrunBytes / _bytesPerMs;
+    public double UnderrunMilliseconds =>
+        WaveFormat.AverageBytesPerSecond > 0
+            ? _underrunBytes * 1000.0 / WaveFormat.AverageBytesPerSecond
+            : 0;
+    public double CurrentRate => _rate;
+    /// <summary>平均播放速率，1.0 表示与实时同步</summary>
+    public double AverageRate => _rateSamples > 0 ? _rateSum / _rateSamples : 1.0;
 
-    public int BufferedMilliseconds
+    public double BufferedMilliseconds
     {
-        get
-        {
-            lock (_gate)
-            {
-                return (int)(_filled / _bytesPerMs);
-            }
-        }
+        get { lock (_gate) return _filledFrames / _framesPerMs; }
     }
 
     public int BufferedBytes
     {
-        get
-        {
-            lock (_gate) return _filled;
-        }
+        get { lock (_gate) return _filledFrames * _blockAlign; }
     }
 
     /// <summary>写入一帧 PCM。tick 用于估算网络抖动（相邻帧 tick 差 × 帧时长 = 期望到达间隔）。</summary>
@@ -116,11 +114,7 @@ public sealed class JitterBuffer : IWaveProvider
         _lastTick = tick;
         _frameCount++;
 
-        if (_frameCount < 20)
-        {
-            // 预热阶段先按上限攒够，避免一开始就欠载
-            return;
-        }
+        if (_frameCount < 20) return;
 
         int desired = (int)Math.Clamp(
             _minTargetMs + _underrunPenaltyMs + 3.0 * _jitterMs,
@@ -131,94 +125,100 @@ public sealed class JitterBuffer : IWaveProvider
 
         if (desired > _targetMs)
         {
-            // 抖动变大时快速抬高，宁可多 20ms 也不断续
             _targetMs = Math.Min(desired, _targetMs + 5);
         }
         else
         {
-            // 抖动静下来后缓慢回落，避免关键时刻忽然欠载
             _targetMs = Math.Max(desired, _targetMs - 1);
         }
     }
 
     private void Append(byte[] data)
     {
+        int frames = data.Length / _blockAlign;
         int offset = 0;
-        int remaining = data.Length;
 
-        // 环满了先扔最旧的，保证新数据能进来
-        while (remaining > 0 && _ring.Length - _filled < remaining)
+        for (int i = 0; i < frames; i++)
         {
-            int need = remaining - (_ring.Length - _filled);
-            DropOldest(Snap(need));
-        }
+            if (_filledFrames >= _capacityFrames)
+            {
+                // 环满：硬丢最旧的一帧并记录（正常靠速率微调不会走到这里）
+                AdvanceReadFrame();
+                _overflows++;
+                _droppedMs += 1.0 / _framesPerMs;
+            }
 
-        while (remaining > 0)
-        {
-            int space = Math.Min(remaining, _ring.Length - _writePos);
-            Buffer.BlockCopy(data, offset, _ring, _writePos, space);
-            _writePos = (_writePos + space) % _ring.Length;
-            _filled += space;
-            offset += space;
-            remaining -= space;
+            Buffer.BlockCopy(data, offset, _ring, _writeFrame * _blockAlign, _blockAlign);
+            _writeFrame = (_writeFrame + 1) % _capacityFrames;
+            _filledFrames++;
+            offset += _blockAlign;
         }
     }
 
-    private void DropOldest(int bytes)
+    private void AdvanceReadFrame()
     {
-        if (bytes <= 0 || _filled <= 0) return;
-        bytes = Math.Min(bytes, _filled);
-        _readPos = (_readPos + bytes) % _ring.Length;
-        _filled -= bytes;
-        _droppedMs += bytes / _bytesPerMs;
+        _readFrame = (_readFrame + 1) % _capacityFrames;
+        if (_filledFrames > 0) _filledFrames--;
     }
 
-    private int Snap(int bytes)
+    /// <summary>
+    /// 按水位偏差算播放速率：缓冲多就播快，少就播慢。
+    /// 幅度限制在 ±6%，一秒能吃掉/补回约 60ms 的偏差。
+    /// </summary>
+    private double ComputeRate()
     {
-        int aligned = bytes - bytes % _blockAlign;
-        return aligned > 0 ? aligned : _blockAlign;
+        double targetFrames = _targetMs * _framesPerMs;
+        double diffMs = (_filledFrames - targetFrames) / _framesPerMs;
+        double normalized = Math.Clamp(diffMs / RateFullScaleMs, -1.0, 1.0);
+        return 1.0 + normalized * MaxRateDeviation;
     }
 
     public int Read(byte[] buffer, int offset, int count)
     {
         lock (_gate)
         {
-            // 积压超过目标 + 迟滞就追平。迟滞别设太大，否则会长期停在「目标 + 迟滞」附近。
-            if (_frameCount >= 20)
+            int outFrames = count / _blockAlign;
+            if (outFrames <= 0) return count;
+
+            _rate = _frameCount < 20 ? 1.0 : ComputeRate();
+            _rateSum += _rate;
+            _rateSamples++;
+
+            int produced = 0;
+            for (; produced < outFrames; produced++)
             {
-                int keepBytes = (int)(_targetMs * _bytesPerMs) + _readChunkBytes;
-                int excess = _filled - keepBytes;
-                if (excess > _hysteresisBytes)
+                if (_filledFrames < 2) break;
+
+                int srcA = _readFrame * _blockAlign;
+                int srcB = ((_readFrame + 1) % _capacityFrames) * _blockAlign;
+                double t = _readFrac;
+                int dst = offset + produced * _blockAlign;
+
+                // 逐采样线性插值（16bit）
+                for (int b = 0; b + 1 < _blockAlign; b += 2)
                 {
-                    int skip = Snap(excess);
-                    _readPos = (_readPos + skip) % _ring.Length;
-                    _filled -= skip;
-                    _droppedMs += skip / _bytesPerMs;
-                    _catchUps++;
+                    short s0 = (short)(_ring[srcA + b] | (_ring[srcA + b + 1] << 8));
+                    short s1 = (short)(_ring[srcB + b] | (_ring[srcB + b + 1] << 8));
+                    short v = (short)(s0 + (s1 - s0) * t);
+                    buffer[dst + b] = (byte)(v & 0xFF);
+                    buffer[dst + b + 1] = (byte)((v >> 8) & 0xFF);
+                }
+
+                _readFrac += _rate;
+                while (_readFrac >= 1.0)
+                {
+                    _readFrac -= 1.0;
+                    AdvanceReadFrame();
                 }
             }
 
-            int available = Math.Min(count, _filled);
-            available -= available % _blockAlign;
-
-            int copied = 0;
-            while (copied < available)
+            if (produced < outFrames)
             {
-                int chunk = Math.Min(available - copied, _ring.Length - _readPos);
-                Buffer.BlockCopy(_ring, _readPos, buffer, offset + copied, chunk);
-                _readPos = (_readPos + chunk) % _ring.Length;
-                copied += chunk;
-            }
-            _filled -= copied;
-
-            if (copied < count)
-            {
-                // 欠载，补静音。必须返回完整 count（IWaveProvider 的 ReadFully 语义），
-                // 否则 WasapiOut 会以为流结束。
-                int gap = count - copied;
-                Array.Clear(buffer, offset + copied, gap);
+                // 欠载：补静音。IWaveProvider 必须返回完整 count，否则 WasapiOut 会以为流结束。
+                int gapBytes = (outFrames - produced) * _blockAlign;
+                Array.Clear(buffer, offset + produced * _blockAlign, gapBytes);
                 _underruns++;
-                _underrunBytes += gap;
+                _underrunBytes += gapBytes;
                 // 记录一次欠载就抬高目标水位，下一帧起生效
                 _underrunPenaltyMs = Math.Min(80, _underrunPenaltyMs + 3);
             }
@@ -228,18 +228,19 @@ public sealed class JitterBuffer : IWaveProvider
     }
 
     /// <summary>
-    /// 预填充静音。在启动播放前调用，让缓冲先有量，
+    /// 预填充静音。启动播放前调用，让缓冲先有量，
     /// 否则 WasapiOut 一开始就读会立刻欠载几十次（听起来是一声爆音）。
     /// </summary>
     public void PrimeSilence(int milliseconds)
     {
         lock (_gate)
         {
-            int bytes = (int)(milliseconds * _bytesPerMs);
-            bytes -= bytes % _blockAlign;
-            if (bytes > 0)
+            int frames = (int)(milliseconds * _framesPerMs);
+            for (int i = 0; i < frames && _filledFrames < _capacityFrames; i++)
             {
-                Append(new byte[bytes]);
+                Array.Clear(_ring, _writeFrame * _blockAlign, _blockAlign);
+                _writeFrame = (_writeFrame + 1) % _capacityFrames;
+                _filledFrames++;
             }
         }
     }
@@ -248,19 +249,23 @@ public sealed class JitterBuffer : IWaveProvider
     {
         lock (_gate)
         {
-            _readPos = 0;
-            _writePos = 0;
-            _filled = 0;
+            _writeFrame = 0;
+            _readFrame = 0;
+            _readFrac = 0;
+            _filledFrames = 0;
             _jitterMs = 0;
             _frameCount = 0;
             _targetMs = _minTargetMs;
             _lastTick = -1;
             _lastArrivalMs = 0;
-            _catchUps = 0;
+            _overflows = 0;
             _droppedMs = 0;
             _underruns = 0;
             _underrunBytes = 0;
             _underrunPenaltyMs = 0;
+            _rate = 1.0;
+            _rateSum = 0;
+            _rateSamples = 0;
         }
     }
 }

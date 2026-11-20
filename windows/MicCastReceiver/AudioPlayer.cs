@@ -50,15 +50,14 @@ public sealed class AudioPlayer : IDisposable
         _ => (15, 100, 20)
     };
 
-    public void Start(int deviceIndex)
+    public void Start(int deviceIndex, int sampleRate, int bits, int channels)
     {
         lock (_gate)
         {
             StopInternal();
-            var format = new WaveFormat(Protocol.SampleRate, Protocol.Bits, Protocol.Channels);
+            var format = new WaveFormat(sampleRate, bits, channels);
             var p = ProfileParams();
-            _buffer = new JitterBuffer(format, p.MinTarget, p.MaxTarget,
-                capacityMs: 500, catchUpHysteresisMs: 8, readChunkMs: p.WasapiLatency);
+            _buffer = new JitterBuffer(format, p.MinTarget, p.MaxTarget, capacityMs: 500);
 
             string? deviceName = null;
             try
@@ -89,10 +88,17 @@ public sealed class AudioPlayer : IDisposable
             _buffer.PrimeSilence(p.MinTarget + p.WasapiLatency);
             _output.Play();
             LastDeviceName = deviceName ?? "默认设备";
+            SampleRate = sampleRate;
+            Bits = bits;
+            Channels = channels;
         }
     }
 
     public string LastDeviceName { get; private set; } = string.Empty;
+    public int SampleRate { get; private set; } = Protocol.SampleRate;
+    public int Bits { get; private set; } = Protocol.Bits;
+    public int Channels { get; private set; } = Protocol.Channels;
+    public bool Running => _buffer is not null;
 
     public void Write(byte[] pcm, long tick)
     {
@@ -104,13 +110,15 @@ public sealed class AudioPlayer : IDisposable
         }
     }
 
-    public int BufferedMilliseconds => _buffer?.BufferedMilliseconds ?? 0;
+    public int BufferedMilliseconds => (int)(_buffer?.BufferedMilliseconds ?? 0);
     public int TargetMilliseconds => _buffer?.TargetMilliseconds ?? 0;
     public double JitterMilliseconds => _buffer?.JitterMilliseconds ?? 0;
     public long CatchUpCount => _buffer?.CatchUpCount ?? 0;
     public double DroppedMilliseconds => _buffer?.DroppedMilliseconds ?? 0;
     public long UnderrunCount => _buffer?.UnderrunCount ?? 0;
     public double UnderrunMilliseconds => _buffer?.UnderrunMilliseconds ?? 0;
+    public double PlaybackRate => _buffer?.CurrentRate ?? 1.0;
+    public double AveragePlaybackRate => _buffer?.AverageRate ?? 1.0;
 
     private static float ComputeRms(byte[] pcm)
     {

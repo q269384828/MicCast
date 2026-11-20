@@ -143,12 +143,14 @@ public static class Protocol
     public const int ControlPort = 59100;
     public const int AudioPort = 59100;
     public const int DiscoveryPort = 59200;
-    public const int SampleRate = 48000;
+
+    /// <summary>兜底音频参数。实际以服务端下发的 ServerAudioConfigResponse 为准。</summary>
+    public const int SampleRate = 16000;
     public const int Bits = 16;
-    public const int Channels = 2;
+    public const int Channels = 1;
     public const int OsWindows = 1;
 
-    /// <summary>手机端每帧 5ms / 960 字节，抖动估算要用到</summary>
+    /// <summary>手机端每帧 5ms，抖动估算要用到</summary>
     public const int FrameMs = 5;
 
     public static byte[] BuildClientConfig()
