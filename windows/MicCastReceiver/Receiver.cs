@@ -20,12 +20,14 @@ public sealed class Receiver : IDisposable
     private long _bytesAtLastRate;
     private int _deviceIndex = -1;
     private bool _playerStarted;
+    private volatile bool _connected;
     private readonly object _playerGate = new();
 
     public string PhoneIp { get; private set; } = string.Empty;
     public string ServerName { get; private set; } = string.Empty;
     public string ServerVersion { get; private set; } = string.Empty;
-    public bool Connected => _tcp?.Connected == true;
+    // 不能用 TcpClient.Connected —— 它只反映最后一次 I/O 的结果，对端关掉后仍会返回 true
+    public bool Connected => _connected;
     public long Frames { get; private set; }
     public long Bytes { get; private set; }
     public double Fps { get; private set; }
@@ -50,6 +52,8 @@ public sealed class Receiver : IDisposable
     public string LastError { get; private set; } = string.Empty;
     public event Action<string>? Log;
     public event Action? StateChanged;
+    /// <summary>对端主动断开或网络中断（不含本地 StopAsync）。</summary>
+    public event Action? Disconnected;
 
     private void Emit(string message) => Log?.Invoke($"{DateTime.Now:HH:mm:ss} {message}");
 
@@ -93,6 +97,7 @@ public sealed class Receiver : IDisposable
             _tcp = new TcpClient { NoDelay = true };
             await _tcp.ConnectAsync(phoneIp, Protocol.ControlPort, token);
             _stream = _tcp.GetStream();
+            _connected = true;
             Emit($"TCP 已连接 {phoneIp}:{Protocol.ControlPort}");
             StateChanged?.Invoke();
         }
@@ -197,7 +202,13 @@ public sealed class Receiver : IDisposable
         }
         finally
         {
+            _connected = false;
             StateChanged?.Invoke();
+            // 主动 StopAsync 会先 Cancel，此时不该触发重连
+            if (!token.IsCancellationRequested)
+            {
+                Disconnected?.Invoke();
+            }
         }
     }
 
@@ -311,6 +322,7 @@ public sealed class Receiver : IDisposable
 
     public async Task StopAsync()
     {
+        _connected = false;
         try { _cts?.Cancel(); } catch { }
         try { _stream?.Dispose(); } catch { }
         try { _tcp?.Close(); } catch { }

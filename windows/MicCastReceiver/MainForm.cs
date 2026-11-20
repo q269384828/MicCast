@@ -50,11 +50,15 @@ public sealed class MainForm : Form
     private readonly TextBox _logBox = new();
 
     private readonly System.Windows.Forms.Timer _uiTimer = new();
+    private readonly System.Windows.Forms.Timer _reconnectTimer = new();
 
     private List<Protocol.DiscoveredServer> _serverItems = new();
     private string _selectedIp = string.Empty;
     private bool _syncingServerBox;
     private bool _installing;
+    /// <summary>用户希望保持接收（手机断开后会自动重连），与「当前是否连着」区分开。</summary>
+    private bool _wantReceiving;
+    private bool _reconnecting;
 
     public MainForm() : this(new StartOptions()) { }
 
@@ -94,6 +98,10 @@ public sealed class MainForm : Form
 
         _receiver.Log += OnLog;
         _receiver.StateChanged += () => BeginInvoke(new Action(UpdateState));
+        _receiver.Disconnected += () => BeginInvoke(new Action(OnPeerDisconnected));
+
+        _reconnectTimer.Interval = 2000;
+        _reconnectTimer.Tick += async (_, _) => await TryReconnectAsync();
 
         _discovery.Log += OnLog;
         _discovery.Changed += () => BeginInvoke(new Action(RefreshServerList));
@@ -546,8 +554,10 @@ public sealed class MainForm : Form
 
     private async Task ToggleAsync()
     {
-        if (_receiver.Connected)
+        if (_wantReceiving)
         {
+            _wantReceiving = false;
+            _reconnectTimer.Stop();
             await _receiver.StopAsync();
             UpdateState();
             return;
@@ -569,6 +579,7 @@ public sealed class MainForm : Form
         }
 
         SaveLastIp(ip);
+        _wantReceiving = true;
         _startButton.Enabled = false;
         try
         {
@@ -577,6 +588,61 @@ public sealed class MainForm : Form
         finally
         {
             _startButton.Enabled = true;
+            UpdateState();
+        }
+        // 首次连接失败也继续重试 —— 手机可能还没点「启动」
+        if (!_receiver.Connected && _wantReceiving)
+        {
+            _reconnectTimer.Start();
+        }
+    }
+
+    private void OnPeerDisconnected()
+    {
+        if (!_wantReceiving)
+        {
+            return;
+        }
+        OnLog($"{DateTime.Now:HH:mm:ss} 手机端已断开，正在自动重连…");
+        _reconnectTimer.Start();
+    }
+
+    private async Task TryReconnectAsync()
+    {
+        // 连接可能要好几秒，期间不能再次进入，否则 StopAsync 会取消掉正在进行的连接
+        if (_reconnecting)
+        {
+            return;
+        }
+        if (!_wantReceiving || _receiver.Connected)
+        {
+            _reconnectTimer.Stop();
+            return;
+        }
+        string ip = _ipBox.Text.Trim();
+        if (!System.Net.IPAddress.TryParse(ip, out _) || _deviceBox.SelectedIndex < 0)
+        {
+            _reconnectTimer.Stop();
+            return;
+        }
+
+        _reconnecting = true;
+        _reconnectTimer.Stop();
+        try
+        {
+            await _receiver.StartAsync(ip, _deviceBox.SelectedIndex);
+            if (_receiver.Connected)
+            {
+                OnLog($"{DateTime.Now:HH:mm:ss} 已重新连上手机");
+            }
+        }
+        finally
+        {
+            _reconnecting = false;
+            if (_wantReceiving && !_receiver.Connected)
+            {
+                _reconnectTimer.Start();
+            }
             UpdateState();
         }
     }
@@ -601,12 +667,17 @@ public sealed class MainForm : Form
     private void UpdateState()
     {
         bool running = _receiver.Connected;
-        _startButton.Text = running ? "停止接收" : "开始接收";
-        _startButton.Kind = running ? ButtonKind.Danger : ButtonKind.Primary;
+        bool reconnecting = _wantReceiving && !running;
+        _startButton.Text = running ? "停止接收" : (reconnecting ? "取消重连" : "开始接收");
+        _startButton.Kind = running ? ButtonKind.Danger : (reconnecting ? ButtonKind.Danger : ButtonKind.Primary);
 
         if (running)
         {
             _pill.Set("接收中", Theme.Ok);
+        }
+        else if (reconnecting)
+        {
+            _pill.Set("重连中…", Theme.Warn);
         }
         else if (_receiver.LastError.Length > 0)
         {
@@ -621,7 +692,12 @@ public sealed class MainForm : Form
             _pill.Set("未启动", Theme.TextFaint);
         }
 
-        if (!running)
+        if (reconnecting)
+        {
+            _hint.Text = "手机端已断开，正在自动重连…（点「取消重连」放弃）";
+            _level.SetLevel(0);
+        }
+        else if (!running)
         {
             _hint.Text = _receiver.LastError.Length > 0
                 ? _receiver.LastError
@@ -660,6 +736,11 @@ public sealed class MainForm : Form
         else
         {
             _level.SetLevel(0);
+            // 断开后别留着上一次的数字，否则看起来像还在收
+            _fpsValue.Text = "0";
+            _kbpsValue.Text = "0";
+            _bufValue.Text = "0";
+            _serverLine.Text = _wantReceiving ? "手机端已断开，等待重连…" : "";
         }
     }
 
@@ -742,7 +823,9 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        _reconnectTimer.Stop();
         _uiTimer.Stop();
+        _wantReceiving = false;
         try { _discovery.Dispose(); } catch { }
         try { _receiver.Dispose(); } catch { }
         base.OnFormClosing(e);

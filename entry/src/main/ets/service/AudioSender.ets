@@ -4,7 +4,40 @@ import { AUDIO_PORT, BITS, CHANNELS, FRAME_BYTES, SAMPLE_RATE, buildStreamData }
 import { Logger } from './Logger';
 
 /**
- * 采集麦克风 PCM（48kHz/16bit/2ch）→ 每 20ms 打成 StreamData protobuf → UDP 发往 PC:59100。
+ * 采集模式。系统对不同 SourceType 会套用不同的音频处理链：
+ *   Raw         —— 原始麦克风，最保真、零额外延迟
+ *   VoiceComm   —— 系统语音通信链（AEC + NS + AGC），嘈杂环境更干净
+ *   VoiceRecog  —— 语音识别链，强调清晰度（部分机型与 Raw 相同）
+ * 具体效果由厂商 DSP 实现，不同机型差异较大，所以交给用户在界面上自选。
+ */
+export enum MicMode {
+  Raw = 0,
+  VoiceComm = 1,
+  VoiceRecog = 2
+}
+
+export function micModeLabel(mode: MicMode): string {
+  if (mode === MicMode.Raw) {
+    return '原始';
+  }
+  if (mode === MicMode.VoiceRecog) {
+    return '识别优先';
+  }
+  return '语音增强';
+}
+
+function toSourceType(mode: MicMode): audio.SourceType {
+  if (mode === MicMode.Raw) {
+    return audio.SourceType.SOURCE_TYPE_MIC;
+  }
+  if (mode === MicMode.VoiceRecog) {
+    return audio.SourceType.SOURCE_TYPE_VOICE_RECOGNITION;
+  }
+  return audio.SourceType.SOURCE_TYPE_VOICE_COMMUNICATION;
+}
+
+/**
+ * 采集麦克风 PCM（16kHz/16bit/单声道）→ 每 5ms 打成 StreamData protobuf → UDP 发往 PC:59100。
  * 同时保留最近 100 帧，供服务端发起丢包重传时回填。
  */
 export class AudioSender {
@@ -18,6 +51,7 @@ export class AudioSender {
   private ringData: Uint8Array[] = [];
   private startedAt: number = 0;
   private running: boolean = false;
+  private mode: MicMode = MicMode.VoiceComm;
 
   framesSent: number = 0;
   bytesSent: number = 0;
@@ -58,26 +92,38 @@ export class AudioSender {
     return Date.now() - this.startedAt;
   }
 
-  async start(ip: string, port: number = AUDIO_PORT): Promise<void> {
-    await this.stop();
-    this.targetIp = ip;
-    this.targetPort = port;
-    this.pending = [];
-    this.tick = 0;
-    this.ringTicks = [];
-    this.ringData = [];
-    this.framesSent = 0;
-    this.bytesSent = 0;
-    this.level = 0;
+  /** 当前采集模式 */
+  currentMode(): MicMode {
+    return this.mode;
+  }
 
-    const udp: socket.UDPSocket = socket.constructUDPSocketInstance();
-    // 官方实现「双方各绑本地 59100」：服务端也要从 59100 发出，客户端按源端口过滤
-    await udp.bind({ address: '0.0.0.0', port: AUDIO_PORT, family: 1 });
-    udp.on('message', (info: socket.SocketMessageInfo) => {
-      this.rxFromServer = this.rxFromServer + 1;
-    });
-    this.udp = udp;
+  /**
+   * 切换采集模式。
+   * 只重建采集器，**UDP 通道保持不变** —— 否则重建 socket 时会重新 bind 59100，
+   * 旧 socket 尚未完全释放就会冲突，导致推流卡死。
+   */
+  async setMode(mode: MicMode): Promise<void> {
+    if (this.mode === mode) {
+      return;
+    }
+    const previous = this.mode;
+    this.mode = mode;
+    if (!this.running) {
+      return;
+    }
+    try {
+      await this.stopCapturer();
+      await this.startCapturer();
+      Logger.log('audio', `mic mode now ${micModeLabel(mode)}`);
+    } catch (err) {
+      this.mode = previous;
+      Logger.log('audio', `switch mic mode failed: ${err}`);
+      throw err as Error;
+    }
+  }
 
+  /** 创建并启动采集器，把数据接到 onPcm。 */
+  private async startCapturer(): Promise<void> {
     const capturer: audio.AudioCapturer = await this.createCapturer();
     this.capturer = capturer;
     capturer.on('readData', (buffer: ArrayBuffer) => {
@@ -97,19 +143,65 @@ export class AudioSender {
     await capturer.start();
     this.capturing = true;
     this.running = true;
-    this.startedAt = Date.now();
+    if (this.startedAt === 0) {
+      this.startedAt = Date.now();
+    }
     let bufSize: number = -1;
     try {
       bufSize = await capturer.getBufferSize();
     } catch (err) {
       Logger.log('audio', `getBufferSize failed: ${err}`);
     }
-    Logger.log('audio', `capture started (16kHz mono) bufSize=${bufSize} → ${ip}:${AUDIO_PORT}`);
+    Logger.log('audio', `capture started (16kHz mono, ${micModeLabel(this.mode)}) bufSize=${bufSize}`);
+  }
+
+  /** 停止并释放采集器，不动 UDP。 */
+  private async stopCapturer(): Promise<void> {
+    const capturer: audio.AudioCapturer | undefined = this.capturer;
+    this.capturer = undefined;
+    this.capturing = false;
+    if (capturer !== undefined) {
+      try {
+        capturer.off('readData');
+        await capturer.stop();
+        await capturer.release();
+      } catch (err) {
+        Logger.log('audio', `capturer stop failed: ${err}`);
+      }
+    }
+    // release 是异步的，稍等一下让音频框架彻底回收，否则立刻重建会失败
+    await new Promise<void>((resolve) => setTimeout(() => resolve(), 120));
+  }
+
+  async start(ip: string, port: number = AUDIO_PORT): Promise<void> {
+    await this.stop();
+    // close() 是异步的，立刻重绑同一端口可能失败
+    await new Promise<void>((resolve) => setTimeout(() => resolve(), 150));
+    this.targetIp = ip;
+    this.targetPort = port;
+    this.pending = [];
+    this.tick = 0;
+    this.ringTicks = [];
+    this.ringData = [];
+    this.framesSent = 0;
+    this.bytesSent = 0;
+    this.level = 0;
+
+    const udp: socket.UDPSocket = socket.constructUDPSocketInstance();
+    // 官方实现「双方各绑本地 59100」：服务端也要从 59100 发出，客户端按源端口过滤
+    await udp.bind({ address: '0.0.0.0', port: AUDIO_PORT, family: 1 });
+    udp.on('message', (info: socket.SocketMessageInfo) => {
+      this.rxFromServer = this.rxFromServer + 1;
+    });
+    this.udp = udp;
+
+    await this.startCapturer();
+    Logger.log('audio', `streaming to ${ip}:${AUDIO_PORT}`);
   }
 
   private async createCapturer(): Promise<audio.AudioCapturer> {
     const capturerInfo: audio.AudioCapturerInfo = {
-      source: audio.SourceType.SOURCE_TYPE_MIC,
+      source: toSourceType(this.mode),
       capturerFlags: 0
     };
     // 固定 16kHz 单声道：麦克风通话够用，带宽只有 48kHz 立体声的 1/6。
@@ -203,19 +295,8 @@ export class AudioSender {
 
   async stop(): Promise<void> {
     this.running = false;
-    this.capturing = false;
     this.level = 0;
-    const capturer: audio.AudioCapturer | undefined = this.capturer;
-    this.capturer = undefined;
-    if (capturer !== undefined) {
-      try {
-        capturer.off('readData');
-        await capturer.stop();
-        await capturer.release();
-      } catch (err) {
-        Logger.log('audio', `capturer stop failed: ${err}`);
-      }
-    }
+    await this.stopCapturer();
     const udp: socket.UDPSocket | undefined = this.udp;
     this.udp = undefined;
     if (udp !== undefined) {

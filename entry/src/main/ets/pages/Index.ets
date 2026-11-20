@@ -1,10 +1,12 @@
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
-import { AudioSender } from '../service/AudioSender';
+import { AudioSender, MicMode, micModeLabel } from '../service/AudioSender';
 import { MicServer } from '../service/MicServer';
 import { BackgroundTaskGuard } from '../service/BackgroundTaskGuard';
 import { Logger } from '../service/Logger';
 import { AUDIO_PORT } from '../model/Messages';
+
+const MIC_MODES: MicMode[] = [MicMode.Raw, MicMode.VoiceComm, MicMode.VoiceRecog];
 
 function pad2(value: number): string {
   return value < 10 ? `0${value}` : `${value}`;
@@ -27,6 +29,7 @@ struct Index {
   @State logs: string[] = [];
   @State showLogs: boolean = false;
   @State showGuide: boolean = true;
+  @State micMode: MicMode = MicMode.VoiceComm;
 
   private server: MicServer = new MicServer();
   private sender: AudioSender = new AudioSender();
@@ -160,6 +163,16 @@ struct Index {
     return '点下面的按钮开始，电脑和手机连同一个 Wi-Fi 就行。';
   }
 
+  private modeHint(): string {
+    if (this.micMode === MicMode.Raw) {
+      return '原始音频，不做任何处理。最保真，适合安静环境。';
+    }
+    if (this.micMode === MicMode.VoiceRecog) {
+      return '语音识别用的处理链，强调清晰度。部分机型与「原始」相同。';
+    }
+    return '系统语音通信处理链（降噪 + 增益），嘈杂环境更干净。效果因机型而异。';
+  }
+
   private async ensureMicPermission(): Promise<boolean> {
     try {
       const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -184,14 +197,35 @@ struct Index {
       return;
     }
     try {
+      await this.sender.setMode(this.micMode);
       await this.sender.start(ip, AUDIO_PORT);
       this.streamingIp = ip;
       await this.bgGuard.start(ctx);
       this.getUIContext().getPromptAction().showToast({ message: `已连接电脑 ${ip}，开始串流` });
-      Logger.log('ui', `streaming mic to ${ip}`);
+      Logger.log('ui', `streaming mic to ${ip} (${micModeLabel(this.micMode)})`);
     } catch (err) {
       this.message = `启动麦克风失败：${err}`;
       Logger.log('ui', this.message);
+    }
+    this.refresh();
+  }
+
+  /** 切换采集模式：串流中会重连采集，有极短暂音属正常 */
+  private async setMicMode(mode: MicMode): Promise<void> {
+    if (this.micMode === mode) {
+      return;
+    }
+    this.micMode = mode;
+    if (this.sender.isRunning()) {
+      try {
+        await this.sender.setMode(mode);
+        this.getUIContext().getPromptAction().showToast({ message: `已切换到「${micModeLabel(mode)}」` });
+      } catch (err) {
+        Logger.log('ui', `switch mode failed: ${err}`);
+        // 常驻显示，别让用户错过
+        this.message = `切换采集模式失败：${err}`;
+        this.getUIContext().getPromptAction().showToast({ message: `切换失败：${err}` });
+      }
     }
     this.refresh();
   }
@@ -370,6 +404,53 @@ struct Index {
                 .fontColor($r('app.color.state_warn'))
                 .width('100%')
             }
+
+            Divider()
+              .color($r('app.color.divider'))
+              .margin({ top: 2 })
+
+            // 采集模式：系统对不同 SourceType 套用不同的音频处理链，效果因机型而异
+            Column({ space: 8 }) {
+              Row() {
+                Text('采集模式')
+                  .fontSize(12)
+                  .fontColor($r('app.color.text_muted'))
+                Blank()
+                Text(this.streaming ? '切换会让声音断一下' : '')
+                  .fontSize(10)
+                  .fontColor($r('app.color.text_muted'))
+              }
+              .width('100%')
+
+              Row({ space: 0 }) {
+                ForEach(MIC_MODES, (mode: MicMode) => {
+                  Text(micModeLabel(mode))
+                    .layoutWeight(1)
+                    .height(34)
+                    .fontSize(12.5)
+                    .textAlign(TextAlign.Center)
+                    .fontColor(this.micMode === mode ? $r('app.color.on_accent') : $r('app.color.text_muted'))
+                    .backgroundColor(this.micMode === mode ? $r('app.color.accent') : Color.Transparent)
+                    .borderRadius(9)
+                    .animation({ duration: 180, curve: Curve.EaseOut })
+                    .onClick(() => {
+                      this.setMicMode(mode);
+                    })
+                }, (mode: MicMode) => `${mode}`)
+              }
+              .padding(3)
+              .backgroundColor($r('app.color.tile_bg'))
+              .borderRadius(12)
+              .width('100%')
+
+              Text(this.modeHint())
+                .fontSize(11)
+                .lineHeight(16)
+                .fontColor($r('app.color.text_muted'))
+                .width('100%')
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
           .padding(16)
