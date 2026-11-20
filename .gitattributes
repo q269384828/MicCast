@@ -1,0 +1,30 @@
+# 统一换行符，避免跨平台协作时整文件 diff
+* text=auto
+
+# 脚本与配置保持 LF
+*.sh      text eol=lf
+*.py      text eol=lf
+*.js      text eol=lf
+*.json    text eol=lf
+*.json5   text eol=lf
+*.md      text eol=lf
+*.ets     text eol=lf
+*.ts      text eol=lf
+*.cs      text eol=lf
+*.csproj  text eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制资源：绝对不要做换行符转换，否则图片/图标会损坏
+*.png     binary
+*.ico     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.zip     binary
+*.wav     binary
+*.p12     binary
+*.p7b     binary
+*.cer     binary
