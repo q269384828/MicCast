@@ -1,14 +1,14 @@
-# DevEco Studio / hvigor
-/.hvigor/
-/build/
-/entry/build/
-/oh_modules/
-/entry/oh_modules/
-/oh-package-lock.json5
-/local.properties
+# ===== DevEco Studio / hvigor（HarmonyOS 工程在 harmony/ 下） =====
+/harmony/.hvigor/
+/harmony/build/
+/harmony/entry/build/
+/harmony/oh_modules/
+/harmony/entry/oh_modules/
+/harmony/oh-package-lock.json5
+/harmony/local.properties
 # hvigor-wrapper.js 由 hvigorw 首次运行时自动生成
-/hvigor/hvigor-wrapper.js
-/hvigor/hvigor-wrapper.js.sha256
+/harmony/hvigor/hvigor-wrapper.js
+/harmony/hvigor/hvigor-wrapper.js.sha256
 
 # 构建日志与临时文件
 build*.log
@@ -16,16 +16,14 @@ build*.log
 /windows/*.log
 
 # 签名材料（千万不要入库）
-/entry/build/default/outputs/**/*.p7b
-/entry/build/default/outputs/**/*.cer
-/entry/build/default/outputs/**/*.p12
-**/*.p12
 **/*.p7b
+**/*.cer
+**/*.p12
 **/*.keystore
 **/*.jks
 
 # 含签名密码的本地构建配置；入库的 build-profile.json5 必须是模板
-/build-profile.local.json5
+/harmony/build-profile.local.json5
 
 # Windows 接收端构建产物
 /windows/**/bin/

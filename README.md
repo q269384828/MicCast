@@ -76,34 +76,31 @@ Windows 的 `app.ico`（16/24/32/48/64/128/256）以及多尺寸预览图。
 | 模式 | SourceType | 说明 |
 |---|---|---|
 | 原始 | `SOURCE_TYPE_UNPROCESSED` | 不做任何处理，最保真（API 14+，设备不支持时自动回退 `MIC`） |
-| 语音增强 | `SOURCE_TYPE_LIVE` | 直播场景降噪链（NS + AGC），不依赖通话上下文（API 17+） |
 | 识别优先 | `SOURCE_TYPE_VOICE_RECOGNITION` | 偏语音识别优化的处理链 |
 
-> **踩过的坑：不要用 `SOURCE_TYPE_VOICE_COMMUNICATION`。**
+> **为什么只有两档**
+>
+> 曾经有第三档「语音增强」（`SOURCE_TYPE_VOICE_COMMUNICATION`），已移除。
 > 它是 VoIP 专用源类型，没有建立通话音频场景时会**持续返回全零数据**。表象极具迷惑性：
 > 采集器正常运行、帧率 207/s、UDP 推流 `sendErr=0`、`readData` 回调持续触发，
 > 但 UI 上「麦克风输入」一直显示「静音」，PC 端电平 −96.7 dBFS。
 > 华为官方「录音无声排查」文档点名了这个误用 —— 普通录音误用 `VOICE_COMMUNICATION`
 > 会导致「data is received but nearly silent」。
+> 改用 `SOURCE_TYPE_LIVE` 曾能出声（−35.1 dBFS），但依赖厂商 DSP 行为、跨机型不可靠，
+> 与其留一档时好时坏的选择，不如去掉。需要降噪的场景请自行在系统侧处理。
 
-实测三档 PC 端电平（同一外部音源）：
+实测两档 PC 端电平（同一外部音源）：
 
 | 模式 | SourceType | RMS | 峰值 | 结果 |
 |---|---|---|---|---|
 | 原始 | `UNPROCESSED` | −30.4 dBFS | −9.3 | ✅ |
-| 语音增强（修复前） | `VOICE_COMMUNICATION` | **−96.7 dBFS** | −71.2 | ❌ 全零 |
-| 语音增强（修复后） | `LIVE` | −35.1 dBFS | −8.9 | ✅ |
 | 识别优先 | `VOICE_RECOGNITION` | −45.8 dBFS | −26.6 | ✅ |
 
-**三档的处理差异**（用外部音源实录，`tools/record-cable.ps1` 可复现）：
+**两档的处理差异**（用外部音源实录，`tools/record-cable.ps1` 可复现）：
 
-- **语音增强 / 识别优先会压静音段**：语音增强收尾底噪 −34.1 → −75.0 dBFS，
-  识别优先 −71.7 dBFS。停顿处变成绝对安静，开口瞬间 AGC 又把增益推上来，
-  主观上是「死寂 → 突然变响」。这是降噪链的正常行为，不是故障。
+- **识别优先会压静音段**：收尾底噪压到 −71.7 dBFS。停顿处变成绝对安静，
+  开口瞬间 AGC 又把增益推上来，主观上是「死寂 → 突然变响」。这是降噪链的正常行为。
 - **原始不做任何处理**：底噪保持 −34.1 dBFS，动态不受改动。
-- 过零率语音增强反而更高，所以**不是发闷**，是动态被改了。
-
-三档都能被 `Win+H` 正确识别（真人说话或外部音源实测均可）。
 
 **测试方法上的两个陷阱**（都会造成假阴性）：
 
@@ -113,7 +110,7 @@ Windows 的 `app.ico`（16/24/32/48/64/128/256）以及多尺寸预览图。
    `Get-Process TextInputHost | Select -Expand Modules`，能看到 `xaudio2_9.dll`。
 
 因此手机端**默认用「原始」**（`AudioSender` 里 `mode` 的初值）。默认应该是最少意外的那档，
-需要降噪的人自己在界面上切过去。
+需要降噪的人自己在界面上切到「识别优先」。
 
 **串流中切换不会断开连接**：`AudioSender.setMode()` 只做「停旧采集器 → 建新采集器」，
 UDP 推流通道保持不变（重建 UDP socket 会重新 bind 59100，旧 socket 尚未释放时会冲突）。
@@ -265,54 +262,74 @@ MicCastReceiver.exe --help                # 完整参数说明
 
 ## 目录结构
 
+仓库是 monorepo，**两个平台工程完全独立**，各自有独立的构建入口：
+
 ```
 MicCast/
-├── AppScope/app.json5                    # bundleName: com.local.miccast
-├── README.md
-├── ROADMAP.md                            # 后续迭代计划
-├── LICENSE
-├── entry/src/main/
-│   ├── ets/
-│   │   ├── model/
-│   │   │   ├── Pb.ets                    # 手写 protobuf 编解码（无三方依赖）
-│   │   │   └── Messages.ets              # 协议消息定义与构造函数
-│   │   ├── service/
-│   │   │   ├── MicServer.ets             # TCP 59100 服务端 + 握手 + 2s 心跳 + 断开回调
-│   │   │   ├── AudioSender.ets           # AudioCapturer → 5ms/960B 帧 → UDP 59100
-│   │   │   ├── BackgroundTaskGuard.ets   # audioRecording 长时任务
-│   │   │   └── Logger.ets
-│   │   ├── pages/Index.ets               # UI
-│   │   └── entryability/EntryAbility.ets
-│   └── resources/
-│       ├── base/element/color.json       # 浅色配色
-│       └── dark/element/color.json       # 深色配色
-├── windows/
+├── harmony/                              # ★ HarmonyOS 工程（用 DevEco Studio 打开这个目录）
+│   ├── AppScope/app.json5                # bundleName: com.local.miccast
+│   ├── build-profile.json5               # 构建配置（签名模板，不含密码）
+│   ├── build-profile.local.json5         # 本地签名配置（.gitignore 忽略）
+│   ├── hvigorw / hvigorfile.ts
+│   └── entry/src/main/
+│       ├── ets/
+│       │   ├── model/
+│       │   │   ├── Pb.ets                # 手写 protobuf 编解码（无三方依赖）
+│       │   │   └── Messages.ets          # 协议消息定义与构造函数
+│       │   ├── service/
+│       │   │   ├── MicServer.ets         # TCP 59100 服务端 + 握手 + 2s 心跳 + 断开回调
+│       │   │   ├── AudioSender.ets       # AudioCapturer → 5ms/160B 帧 → UDP 59100
+│       │   │   ├── BackgroundTaskGuard.ets  # audioRecording 长时任务
+│       │   │   └── Logger.ets
+│       │   ├── pages/Index.ets           # UI
+│       │   └── entryability/EntryAbility.ets
+│       └── resources/
+│           ├── base/element/color.json   # 浅色配色
+│           └── dark/element/color.json   # 深色配色
+│
+├── windows/                              # ★ Windows 接收端（用 Visual Studio / dotnet 打开）
 │   ├── MicCastReceiver/
+│   │   ├── MicCastReceiver.csproj
 │   │   ├── Discovery.cs                  # UDP 59200 发现监听
 │   │   ├── Receiver.cs                   # TCP 握手 + UDP 收流
 │   │   ├── Protocol.cs                   # 协议常量 / 消息构造 / 发现包解析
 │   │   ├── AudioPlayer.cs                # NAudio WasapiOut
+│   │   ├── JitterBuffer.cs               # 抖动缓冲 + 丢包推断
 │   │   ├── VbCable.cs                    # VB-CABLE 检测 + 一键下载安装
 │   │   ├── Backend/                      # 逻辑层（与界面解耦）
 │   │   │   ├── IBackend.cs               # 前端看到的统一门面（状态流 + 日志流）
 │   │   │   ├── ReceiverHost.cs           # 唯一逻辑：发现/连接/重连/设备选择
 │   │   │   └── BackendPipe.cs            # 命名管道服务端 + 客户端（逻辑单例的执行者）
 │   │   ├── MainForm.cs                   # 主界面与布局
-│   │   ├── Program.cs                    # 命令行入口（GUI / --headless / --discover / --list-devices）
+│   │   ├── Program.cs                    # 命令行入口（GUI / --headless / --status / --list-devices）
 │   │   └── Ui/                           # 自绘控件（零第三方 UI 库）
-│   │       ├── Theme.cs                  # 深浅色配色 + 圆角绘制
-│   │       ├── Card.cs / ModernButton.cs / DropDown.cs
+│   │       ├── Theme.cs / Card.cs / ModernButton.cs / DropDown.cs
 │   │       ├── TextField.cs / StatusPill.cs / LevelMeter.cs
 │   │       └── NativeFx.cs               # Win11 圆角 + 深色标题栏
-│   ├── Set-DefaultMic.ps1                # 切换系统默认录音设备
+│   └── Set-DefaultMic.ps1                # 切换系统默认录音设备
+│
 ├── docs/icon-preview.png                 # 图标多尺寸预览（由脚本生成）
-└── tools/
-    ├── make-icon.py                      # 生成全平台图标（可复现）
-    ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
-    ├── lan-scan.js                       # 扫描局域网里的 hdc 调试端口
-    ├── check-continuity.ps1              # 录 CABLE Output 逐帧扫空洞，验证音频连续性
-    ├── record-cable.ps1                  # 按设备名录 WAV，用于对比三档采集模式的听感
-    └── install.ps1                       # 构建 + 装机 + 抓日志
+├── tools/                                # 跨平台开发脚本
+│   ├── make-icon.py                      # 生成全平台图标（可复现）
+│   ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
+│   ├── lan-scan.js                       # 扫描局域网里的 hdc 调试端口
+│   ├── check-continuity.ps1              # 录 CABLE Output 逐帧扫空洞
+│   ├── record-cable.ps1                  # 按设备名录 WAV，对比采集模式听感
+│   └── install.ps1                       # 构建 + 装机 + 抓日志
+│
+├── README.md
+├── ROADMAP.md                            # 后续迭代计划
+└── LICENSE
+```
+
+**构建方式：**
+
+```bash
+# HarmonyOS
+cd harmony && ./hvigorw assembleHap
+
+# Windows
+cd windows/MicCastReceiver && dotnet build -c Release
 ```
 
 ## 协议要点

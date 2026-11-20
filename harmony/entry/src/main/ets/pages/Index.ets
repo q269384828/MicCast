@@ -6,7 +6,7 @@ import { BackgroundTaskGuard } from '../service/BackgroundTaskGuard';
 import { Logger } from '../service/Logger';
 import { AUDIO_PORT } from '../model/Messages';
 
-const MIC_MODES: MicMode[] = [MicMode.Raw, MicMode.VoiceComm, MicMode.VoiceRecog];
+const MIC_MODES: MicMode[] = [MicMode.Raw, MicMode.VoiceRecog];
 
 function pad2(value: number): string {
   return value < 10 ? `0${value}` : `${value}`;
@@ -168,10 +168,7 @@ struct Index {
     if (this.micMode === MicMode.Raw) {
       return '原始音频，不做任何处理。最保真，适合安静环境和语音输入。';
     }
-    if (this.micMode === MicMode.VoiceRecog) {
-      return '语音识别用的处理链，强调清晰度。会有约 10ms 起始延迟，建议优先用「原始」录音。';
-    }
-    return '直播场景处理链（降噪 + 增益），嘈杂环境更干净。会压掉部分静音段，语音识别率可能略低于「原始」。';
+    return '语音识别用的处理链，强调清晰度。会有约 10ms 起始延迟，建议优先用「原始」录音。';
   }
 
   private async ensureMicPermission(): Promise<boolean> {

@@ -5,25 +5,24 @@ import { Logger } from './Logger';
 
 /**
  * 采集模式。系统对不同 SourceType 会套用不同的音频处理链：
- *   Raw         —— 原始麦克风，最保真、零额外延迟
- *   VoiceComm   —— 直播场景链（NS + AGC），嘈杂环境更干净
+ *   Raw         —— UNPROCESSED，原始麦克风数据，最保真、零额外延迟
  *   VoiceRecog  —— 语音识别链，强调清晰度（部分机型与 Raw 相同）
  * 具体效果由厂商 DSP 实现，不同机型差异较大，所以交给用户在界面上自选。
+ *
+ * 曾经的第三档「语音增强」（SOURCE_TYPE_VOICE_COMMUNICATION）已移除：
+ * 那是 VoIP 专用源类型，未建立通话音频场景时会持续返回全零数据，
+ * 表现为「采集器在跑、帧率正常、但麦克风输入一直静音」，无法可靠使用。
  */
 export enum MicMode {
   Raw = 0,
-  VoiceComm = 1,
-  VoiceRecog = 2
+  VoiceRecog = 1
 }
 
 export function micModeLabel(mode: MicMode): string {
   if (mode === MicMode.Raw) {
     return '原始';
   }
-  if (mode === MicMode.VoiceRecog) {
-    return '识别优先';
-  }
-  return '语音增强';
+  return '识别优先';
 }
 
 function toSourceType(mode: MicMode): audio.SourceType {
@@ -32,13 +31,7 @@ function toSourceType(mode: MicMode): audio.SourceType {
     // 比 MIC 更贴近「不做任何处理」，MIC 仍可能过一道基础优化。
     return audio.SourceType.SOURCE_TYPE_UNPROCESSED;
   }
-  if (mode === MicMode.VoiceRecog) {
-    return audio.SourceType.SOURCE_TYPE_VOICE_RECOGNITION;
-  }
-  // 语音增强走 LIVE（直播场景）：带降噪但不依赖通话上下文。
-  // 不能用 VOICE_COMMUNICATION —— 那是 VoIP 专用，没建立通话场景时会直接给出全零数据，
-  // 表现为「采集器在跑、帧率正常、但麦克风输入一直静音」。
-  return audio.SourceType.SOURCE_TYPE_LIVE;
+  return audio.SourceType.SOURCE_TYPE_VOICE_RECOGNITION;
 }
 
 /**
@@ -56,9 +49,7 @@ export class AudioSender {
   private ringData: Uint8Array[] = [];
   private startedAt: number = 0;
   private running: boolean = false;
-  // 默认「原始」。实测语音增强虽然把底噪压掉 41dB，但停顿处瞬间死寂、
-  // 开口时 AGC 又把音量顶上来，抽吸感明显，安静环境下反而像故障。
-  // 需要降噪的人自己在界面上切过去。
+  // 默认「原始」：零处理、零额外延迟，最少意外。
   private mode: MicMode = MicMode.Raw;
 
   framesSent: number = 0;

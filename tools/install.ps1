@@ -17,7 +17,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $PSScriptRoot
+$repo = Split-Path -Parent $PSScriptRoot
+# HarmonyOS 工程已独立到 harmony/ 子目录，构建相关路径都以它为准
+$root = Join-Path $repo 'harmony'
 Set-Location $root
 
 $hdc = Join-Path $DevEco 'sdk\default\openharmony\toolchains\hdc.exe'

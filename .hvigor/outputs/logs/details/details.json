@@ -1,0 +1,87 @@
+{
+  "HVIGOR_OHOS_PLUGIN": {
+    "MODULES": [
+      {
+        "MODULE_NAME": "923fe53966c6cd9343e11af776cd4b05be315ea4b200b02e4d5dfb0f929b73bf",
+        "API_TYPE": "stageMode",
+        "INCLUDE_IN_BUILD": true,
+        "IS_COMMAND_LINE_ENTRY_MODULE": false,
+        "BUILD_OPTION": [
+          {
+            "path": "debuggable",
+            "traceValue": true,
+            "value": true
+          },
+          {
+            "path": "copyFrom",
+            "traceValue": false,
+            "value": ""
+          }
+        ],
+        "PACKAGE_JSON": [],
+        "MODULE_TYPE": "entry",
+        "INCREMENTAL_TASKS": {
+          "COMPILE_ARKTS": true
+        },
+        "IS_INCREMENTAL_MODULE": true
+      }
+    ],
+    "NATIVE_COMPILER": "Default",
+    "IS_FULL_BUILD": false,
+    "PACKAGE_JSON": [],
+    "BUILD_MODE": "debug"
+  },
+  "HVIGOR": {
+    "IS_INCREMENTAL": true,
+    "IS_DAEMON": false,
+    "IS_PARALLEL": true,
+    "IS_HVIGORFILE_TYPE_CHECK": false,
+    "IS_EXECUTION_OHPM_BY_HVIGOR": false,
+    "IS_SYNCNATIVE_COMPILATION": false,
+    "BUILD_ANALYSIS_MODE": "normal",
+    "OPTIMIZATION_STRATEGY": "memory",
+    "TASK_TIME": {
+      "923fe53966c6cd9343e11af776cd4b05be315ea4b200b02e4d5dfb0f929b73bf": {
+        "PreBuild": 143307100,
+        "CreateModuleInfo": 813200,
+        "GenerateMetadata": 3233700,
+        "ConfigureCmake": 303400,
+        "MergeProfile": 29978000,
+        "CreateBuildProfile": 2086900,
+        "PreCheckSyscap": 366900,
+        "GeneratePkgContextInfo": 6939200,
+        "ProcessIntegratedHsp": 775300,
+        "BuildNativeWithCmake": 376200,
+        "MakePackInfo": 2664600,
+        "SyscapTransform": 12207900,
+        "ProcessProfile": 131122500,
+        "ProcessStartupConfig": 1203700,
+        "BuildNativeWithNinja": 475600,
+        "ProcessLibs": 5966400,
+        "CompileResource": 215998500,
+        "BuildJS": 2226700,
+        "CompileArkTS": 6404911100,
+        "GeneratePkgModuleJson": 1882300,
+        "ProcessCompiledResources": 460400,
+        "PackageHap": 695200300,
+        "PackingCheck": 5747100,
+        "SignHap": 1555851300,
+        "CollectDebugSymbol": 825300,
+        "assembleHap": 302200
+      }
+    },
+    "CUSTOM_TASK_TIME": {},
+    "CUSTOM_PLUGIN_TIME": {},
+    "APIS": [
+      "getProperty"
+    ],
+    "CONFIG_EXPERIMENT": {
+      "ENABLE_MODULE_SKIP": false,
+      "ENABLE_CPP_FUNCTION_LEVEL_INCREMENTAL": false
+    },
+    "CONFIG_PROPERTIES": {},
+    "BUILD_ID": "202611210101387180",
+    "PID": 66468,
+    "TOTAL_TIME": 12447346300
+  }
+}
