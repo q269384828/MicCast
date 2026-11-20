@@ -68,6 +68,7 @@ public sealed class MainForm : Form
             "light" => AppTheme.Light,
             _ => Theme.DetectSystemTheme()
         });
+        _receiver.Profile = _options.Latency;
 
         Text = "MicCast — 手机麦克风接收端";
         AutoScaleMode = AutoScaleMode.None;
@@ -630,7 +631,7 @@ public sealed class MainForm : Form
         }
         else
         {
-            _serverLine.Text = $"手机 {_receiver.ServerName} v{_receiver.ServerVersion} → 输出 {_receiver.DeviceName}";
+            _serverLine.Text = $"缓冲 {_receiver.BufferedMs}ms / 目标 {_receiver.TargetMs}ms　抖动 {_receiver.JitterMs:F1}ms　追赶 {_receiver.CatchUpCount} 次　欠载 {_receiver.UnderrunMs:F0}ms";
         }
 
         DoLayout();
@@ -644,6 +645,7 @@ public sealed class MainForm : Form
             _fpsValue.Text = $"{_receiver.Fps:F0}";
             _kbpsValue.Text = $"{_receiver.Kbps:F0}";
             _bufValue.Text = $"{_receiver.BufferedMs}";
+            _serverLine.Text = $"缓冲 {_receiver.BufferedMs}ms / 目标 {_receiver.TargetMs}ms　抖动 {_receiver.JitterMs:F1}ms　追赶 {_receiver.CatchUpCount} 次　欠载 {_receiver.UnderrunMs:F0}ms";
 
             double level = Math.Clamp(_receiver.Level, 0, 1);
             double scaled = level <= 0.0001 ? 0 : Math.Clamp((20 * Math.Log10(level) + 60) / 60, 0, 1);
@@ -651,7 +653,7 @@ public sealed class MainForm : Form
 
             if (_options.LogPath.Length > 0 && _receiver.Frames > 0)
             {
-                WriteTrace($"STATS frames={_receiver.Frames} fps={_receiver.Fps:F0} kbps={_receiver.Kbps:F0} buffered={_receiver.BufferedMs}ms level={_receiver.Level:F4} device={_receiver.DeviceName}");
+                WriteTrace($"STATS frames={_receiver.Frames} fps={_receiver.Fps:F0} kbps={_receiver.Kbps:F0} buffered={_receiver.BufferedMs}ms target={_receiver.TargetMs}ms jitter={_receiver.JitterMs:F2}ms catchup={_receiver.CatchUpCount} dropped={_receiver.DroppedMs:F0}ms underrun={_receiver.UnderrunMs:F0}ms underrunCount={_receiver.UnderrunCount} level={_receiver.Level:F4} device={_receiver.DeviceName}");
             }
         }
         else

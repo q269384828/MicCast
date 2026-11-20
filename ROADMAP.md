@@ -9,16 +9,19 @@
 
 ## 高优先级 — 决定它能不能当日常工具
 
-### 1. 延迟优化（当前 ~100ms，目标 30~50ms）
+### 1. ~~延迟优化~~ ✅ 已完成
 
-现状：`BufferedWaveProvider` 固定 600ms 容量、`WasapiOut` 50ms 延迟。
-实测 `buffered` 稳定在 60~95 ms，其实还有压缩空间。
+新增 `JitterBuffer.cs` 替代固定容量的 `BufferedWaveProvider`：
 
-- 做**自适应抖动缓冲**：统计到达间隔的滑动方差，缓冲区在 30~150 ms 间自动伸缩
-- 稳定网络下压到 30~40 ms；抖动大时自动放宽，避免断音
-- 加一个「低延迟模式」开关给游戏/直播场景
+- 按 RFC 3550 指数平滑估算抖动，目标水位 = 下限 + 3×抖动
+- 抖动↑ 快速抬高、抖动↓ 缓慢回落；欠载时自我修正
+- 积压超过目标 + 迟滞就丢弃追平，不让延迟累积
+- 启动前预填充静音，消除起步爆音
+- `--latency low|balanced|stable` 三档
 
-涉及：`windows/MicCastReceiver/AudioPlayer.cs`、`Receiver.cs`
+**实测：缓冲 65ms → 34.9ms（降 46%），逐帧扫描无 ≥2ms 断流。**
+
+剩余可做：`wasapiLatency` 再往下压（15ms）、UDP 收包与 Read 锁分离。
 
 ### 2. 断线自动重连
 

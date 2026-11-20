@@ -28,7 +28,19 @@ public sealed class Receiver : IDisposable
     public double Kbps { get; private set; }
     public float Level => _player.Level;
     public int BufferedMs => _player.BufferedMilliseconds;
+    public int TargetMs => _player.TargetMilliseconds;
+    public double JitterMs => _player.JitterMilliseconds;
+    public long CatchUpCount => _player.CatchUpCount;
+    public double DroppedMs => _player.DroppedMilliseconds;
+    public long UnderrunCount => _player.UnderrunCount;
+    public double UnderrunMs => _player.UnderrunMilliseconds;
     public string DeviceName => _player.LastDeviceName;
+
+    public LatencyProfile Profile
+    {
+        get => _player.Profile;
+        set => _player.Profile = value;
+    }
     public string LastError { get; private set; } = string.Empty;
     public event Action<string>? Log;
     public event Action? StateChanged;
@@ -188,7 +200,7 @@ public sealed class Receiver : IDisposable
                 if (data is null) continue;
                 Frames++;
                 Bytes += data.Payload.Length;
-                _player.Write(data.Payload);
+                _player.Write(data.Payload, data.Tick);
             }
         }
         catch (OperationCanceledException) { }

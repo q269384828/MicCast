@@ -148,6 +148,9 @@ public static class Protocol
     public const int Channels = 2;
     public const int OsWindows = 1;
 
+    /// <summary>手机端每帧 5ms / 960 字节，抖动估算要用到</summary>
+    public const int FrameMs = 5;
+
     public static byte[] BuildClientConfig()
     {
         var multi = new List<byte>(); Pb.WriteVarintField(multi, 1, 0);

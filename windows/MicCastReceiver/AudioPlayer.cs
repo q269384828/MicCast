@@ -2,14 +2,21 @@ using NAudio.Wave;
 
 namespace MicCastReceiver;
 
+public enum LatencyProfile
+{
+    Low,
+    Balanced,
+    Stable
+}
+
 /// <summary>把收到的 PCM 写入指定播放设备。写进虚拟声卡（如 CABLE Input）后，会议软件即可从对应录音端采集。</summary>
 public sealed class AudioPlayer : IDisposable
 {
     private WasapiOut? _output;
-    private BufferedWaveProvider? _buffer;
+    private JitterBuffer? _buffer;
     private readonly object _gate = new();
 
-    public int BufferMilliseconds { get; set; } = 120;
+    public LatencyProfile Profile { get; set; } = LatencyProfile.Balanced;
     public float Level { get; private set; }
 
     public static List<(int Index, string Name)> GetRenderDevices()
@@ -36,18 +43,22 @@ public sealed class AudioPlayer : IDisposable
         return list;
     }
 
+    private (int MinTarget, int MaxTarget, int WasapiLatency) ProfileParams() => Profile switch
+    {
+        LatencyProfile.Low => (10, 50, 15),
+        LatencyProfile.Stable => (50, 250, 40),
+        _ => (15, 100, 20)
+    };
+
     public void Start(int deviceIndex)
     {
         lock (_gate)
         {
             StopInternal();
             var format = new WaveFormat(Protocol.SampleRate, Protocol.Bits, Protocol.Channels);
-            _buffer = new BufferedWaveProvider(format)
-            {
-                BufferDuration = TimeSpan.FromMilliseconds(600),
-                DiscardOnBufferOverflow = true,
-                ReadFully = true
-            };
+            var p = ProfileParams();
+            _buffer = new JitterBuffer(format, p.MinTarget, p.MaxTarget,
+                capacityMs: 500, catchUpHysteresisMs: 8, readChunkMs: p.WasapiLatency);
 
             string? deviceName = null;
             try
@@ -59,7 +70,7 @@ public sealed class AudioPlayer : IDisposable
                 {
                     var mmDevice = devices[deviceIndex];
                     deviceName = mmDevice.FriendlyName;
-                    _output = new WasapiOut(mmDevice, NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, 50);
+                    _output = new WasapiOut(mmDevice, NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, p.WasapiLatency);
                 }
             }
             catch
@@ -69,11 +80,13 @@ public sealed class AudioPlayer : IDisposable
 
             if (_output is null)
             {
-                _output = new WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, 50);
+                _output = new WasapiOut(NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, p.WasapiLatency);
                 deviceName = "默认设备";
             }
 
             _output.Init(_buffer);
+            // 先垫一段静音，避免播放起步瞬间连续欠载
+            _buffer.PrimeSilence(p.MinTarget + p.WasapiLatency);
             _output.Play();
             LastDeviceName = deviceName ?? "默认设备";
         }
@@ -81,27 +94,23 @@ public sealed class AudioPlayer : IDisposable
 
     public string LastDeviceName { get; private set; } = string.Empty;
 
-    public void Write(byte[] pcm)
+    public void Write(byte[] pcm, long tick)
     {
         lock (_gate)
         {
             if (_buffer is null) return;
-            _buffer.AddSamples(pcm, 0, pcm.Length);
+            _buffer.Write(pcm, tick);
             Level = ComputeRms(pcm);
         }
     }
 
-    public int BufferedMilliseconds
-    {
-        get
-        {
-            lock (_gate)
-            {
-                if (_buffer is null) return 0;
-                return (int)(_buffer.BufferedBytes / (double)(Protocol.SampleRate * Protocol.Channels * (Protocol.Bits / 8)) * 1000);
-            }
-        }
-    }
+    public int BufferedMilliseconds => _buffer?.BufferedMilliseconds ?? 0;
+    public int TargetMilliseconds => _buffer?.TargetMilliseconds ?? 0;
+    public double JitterMilliseconds => _buffer?.JitterMilliseconds ?? 0;
+    public long CatchUpCount => _buffer?.CatchUpCount ?? 0;
+    public double DroppedMilliseconds => _buffer?.DroppedMilliseconds ?? 0;
+    public long UnderrunCount => _buffer?.UnderrunCount ?? 0;
+    public double UnderrunMilliseconds => _buffer?.UnderrunMilliseconds ?? 0;
 
     private static float ComputeRms(byte[] pcm)
     {

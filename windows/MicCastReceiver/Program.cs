@@ -82,6 +82,11 @@ internal static class Program
           --list-devices         列出所有播放设备后退出
           --discover [秒数]      不开界面，扫描局域网内的手机后退出（默认 6 秒）
           --theme <dark|light>   强制深浅色，默认跟随系统
+          --latency <low|balanced|stable>
+                                 延迟策略，默认 balanced（约 20~40ms 目标缓冲）
+                                   low     = 最低延迟，网络差时可能断续
+                                   balanced= 自适应（默认）
+                                   stable  = 优先稳定，缓冲更大
           --loopback-verify <毫秒> 启动后播放测试音并回环抓取，输出 RMS 校验链路
           --help, -h             显示本帮助
 
@@ -107,6 +112,7 @@ public sealed class StartOptions
     public string LogPath { get; init; } = string.Empty;
     public int LoopbackVerifyMs { get; init; }
     public string Theme { get; init; } = string.Empty;
+    public LatencyProfile Latency { get; init; } = LatencyProfile.Balanced;
 
     public static StartOptions Parse(string[] args)
     {
@@ -116,6 +122,7 @@ public sealed class StartOptions
         string log = string.Empty;
         int loopback = 0;
         string theme = string.Empty;
+        LatencyProfile latency = LatencyProfile.Balanced;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -136,6 +143,14 @@ public sealed class StartOptions
                 case "--theme" when i + 1 < args.Length:
                     theme = args[++i];
                     break;
+                case "--latency" when i + 1 < args.Length:
+                    latency = args[++i].ToLowerInvariant() switch
+                    {
+                        "low" => LatencyProfile.Low,
+                        "stable" => LatencyProfile.Stable,
+                        _ => LatencyProfile.Balanced
+                    };
+                    break;
                 case "--loopback-verify" when i + 1 < args.Length:
                     int.TryParse(args[++i], out loopback);
                     break;
@@ -144,7 +159,7 @@ public sealed class StartOptions
         return new StartOptions
         {
             Ip = ip, Device = device, AutoStart = auto, LogPath = log,
-            LoopbackVerifyMs = loopback, Theme = theme
+            LoopbackVerifyMs = loopback, Theme = theme, Latency = latency
         };
     }
 }
