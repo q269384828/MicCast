@@ -79,6 +79,7 @@ public sealed class MainForm : Form
         DoubleBuffered = true;
         BackColor = Theme.WindowBg;
         ForeColor = Theme.TextPrimary;
+        ApplyWindowIcon();
 
         BuildControls();
         ApplyTheme();
@@ -667,31 +668,69 @@ public sealed class MainForm : Form
         base.OnPaint(e);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
         int pad = S(22);
-        var mark = new RectangleF(pad, S(18), S(34), S(34));
-        using (var path = Theme.RoundRect(mark, S(10)))
-        using (var brush = new LinearGradientBrush(
-                   new RectangleF(mark.X, mark.Y, mark.Width, mark.Height),
-                   Theme.Accent, Theme.Mix(Theme.Accent, Theme.Ok, 0.45), LinearGradientMode.ForwardDiagonal))
-        {
-            g.FillPath(brush, path);
-        }
+        var mark = new Rectangle(pad, S(16), S(38), S(38));
 
-        float cx = mark.X + mark.Width / 2f;
-        float top = mark.Y + mark.Height * 0.22f;
-        float bodyW = mark.Width * 0.24f;
-        float bodyH = mark.Height * 0.40f;
-        using (var white = new SolidBrush(Color.White))
+        var art = LoadBrandMark(mark.Width);
+        if (art is not null)
         {
-            g.FillEllipse(white, cx - bodyW / 2f, top, bodyW, bodyH);
-            using var pen = new Pen(Color.White, S(2))
+            g.DrawImage(art, mark);
+        }
+    }
+
+    private static Bitmap? _brandMark;
+    private static int _brandMarkSize;
+
+    /// <summary>从嵌入的 app.ico 设置窗体图标，绕开 Windows 图标缓存里的旧版本。</summary>
+    private void ApplyWindowIcon()
+    {
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("MicCastReceiver.app.ico");
+            if (stream is null) return;
+            using var icon = new Icon(stream);
+            Icon = (Icon)icon.Clone();
+        }
+        catch
+        {
+            // 失败就沿用 exe 关联图标，不影响功能
+        }
+    }
+
+    /// <summary>
+    /// 界面左上角的品牌标记用透明底素材叠加在窗口背景上，
+    /// 而不是贴完整图标 —— 带渐变底的图标放在深色界面上会显出亮色方块。
+    /// </summary>
+    private static Bitmap? LoadBrandMark(int size)
+    {
+        if (_brandMark is not null && _brandMarkSize == size) return _brandMark;
+        try
+        {
+            using var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("MicCastReceiver.brand_mark.png");
+            if (stream is null) return null;
+            using var src = new Bitmap(stream);
+            int target = Math.Max(8, size);
+            var scaled = new Bitmap(target, target, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var sg = Graphics.FromImage(scaled))
             {
-                StartCap = LineCap.Round,
-                EndCap = LineCap.Round
-            };
-            g.DrawArc(pen, cx - bodyW * 1.15f, top + bodyH - bodyH * 0.55f, bodyW * 2.3f, bodyH * 1.1f, 20, 140);
-            g.DrawLine(pen, cx, top + bodyH * 1.55f, cx, top + bodyH * 1.95f);
+                sg.Clear(Color.Transparent);
+                sg.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                sg.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                sg.SmoothingMode = SmoothingMode.AntiAlias;
+                sg.DrawImage(src, new Rectangle(0, 0, target, target));
+            }
+            _brandMark?.Dispose();
+            _brandMark = scaled;
+            _brandMarkSize = size;
+            return _brandMark;
+        }
+        catch
+        {
+            return null;
         }
     }
 

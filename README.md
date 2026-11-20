@@ -5,6 +5,13 @@
 > 虚拟声卡推荐 [VB-CABLE](https://vb-audio.com/Cable/)（VB-Audio 出品，donationware，本项目不附带其安装包）。
 > 许可：[MIT](LICENSE)　·　后续迭代计划见 [ROADMAP.md](ROADMAP.md)
 
+<img src="docs/icon-preview.png" width="640" alt="MicCast 图标">
+
+图标由 [tools/make-icon.py](tools/make-icon.py) 生成（圆角渐变底 + 白色麦克风 + 声波弧），
+一次产出手机端 `app_icon.png` / `icon.png`、Hero 用的透明底 `brand_mark.png`、
+Windows 的 `app.ico`（16/24/32/48/64/128/256）以及多尺寸预览图。
+改设计只需改这一个脚本，两端自动保持一致。
+
 ```
 鸿蒙手机（服务端）                         Windows（MicCast Receiver）
 ┌──────────────────────────┐             ┌─────────────────────────────────┐
@@ -132,7 +139,9 @@ MicCast/
 │   │       └── NativeFx.cs               # Win11 圆角 + 深色标题栏
 │   ├── Set-DefaultMic.ps1                # 切换系统默认录音设备
 │   └── README.md
+├── docs/icon-preview.png                 # 图标多尺寸预览（由脚本生成）
 └── tools/
+    ├── make-icon.py                      # 生成全平台图标（可复现）
     ├── player-test.js                    # 纯 Node 模拟客户端连手机服务端，算 RMS
     ├── lan-scan.js                       # 扫描局域网里的 hdc 调试端口
     └── install.ps1                       # 构建 + 装机 + 抓日志

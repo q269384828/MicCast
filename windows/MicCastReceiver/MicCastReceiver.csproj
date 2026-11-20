@@ -9,6 +9,7 @@
     <AssemblyName>MicCastReceiver</AssemblyName>
     <RootNamespace>MicCastReceiver</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -19,6 +20,14 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 界面左上角的品牌标记复用手机端同一份透明底素材，保证两端一致 -->
+    <EmbeddedResource Include="..\..\entry\src\main\resources\base\media\brand_mark.png"
+                      LogicalName="MicCastReceiver.brand_mark.png" />
+    <!-- 窗体/托盘图标：显式加载，避免沿用 Windows 图标缓存里的旧版本 -->
+    <EmbeddedResource Include="app.ico" LogicalName="MicCastReceiver.app.ico" />
   </ItemGroup>
 
 </Project>

@@ -216,7 +216,12 @@ struct Index {
     Column() {
       // ── 顶部渐变 Hero ─────────────────────────────────────
       Column({ space: 12 }) {
-        Row() {
+        Row({ space: 11 }) {
+          Image($r('app.media.brand_mark'))
+            .width(34)
+            .height(34)
+            .objectFit(ImageFit.Contain)
+
           Column({ space: 3 }) {
             Text('MicCast')
               .fontSize(22)
@@ -238,6 +243,7 @@ struct Index {
             .borderRadius(13)
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
 
         if (this.streaming) {
           Column({ space: 6 }) {

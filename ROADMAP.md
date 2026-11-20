@@ -117,7 +117,6 @@ lint:           dotnet format + arktslint
 
 - **Windows**：`--self-contained` 单文件版（免装 .NET 运行时，约 60MB）+ MSI 安装包
 - **鸿蒙**：打 release HAP，或走 AGC 分发
-- 加应用图标（现在是占位图）
 
 ### 12. 自动化测试
 
