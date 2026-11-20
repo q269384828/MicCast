@@ -51,7 +51,10 @@ export class AudioSender {
   private ringData: Uint8Array[] = [];
   private startedAt: number = 0;
   private running: boolean = false;
-  private mode: MicMode = MicMode.VoiceComm;
+  // 默认「原始」。实测语音增强虽然把底噪压掉 41dB，但停顿处瞬间死寂、
+  // 开口时 AGC 又把音量顶上来，抽吸感明显，安静环境下反而像故障。
+  // 需要降噪的人自己在界面上切过去。
+  private mode: MicMode = MicMode.Raw;
 
   framesSent: number = 0;
   bytesSent: number = 0;

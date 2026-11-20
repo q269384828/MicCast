@@ -29,7 +29,7 @@ struct Index {
   @State logs: string[] = [];
   @State showLogs: boolean = false;
   @State showGuide: boolean = true;
-  @State micMode: MicMode = MicMode.VoiceComm;
+  @State micMode: MicMode = MicMode.Raw;
 
   private server: MicServer = new MicServer();
   private sender: AudioSender = new AudioSender();
