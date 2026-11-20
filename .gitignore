@@ -39,3 +39,6 @@ build*.log
 # 系统
 .DS_Store
 Thumbs.db
+
+# 根目录构建缓存
+/.hvigor/
