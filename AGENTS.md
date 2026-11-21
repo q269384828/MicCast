@@ -139,6 +139,52 @@ hdc shell aa start -b com.huawei.hmsapp.music -a MainAbility \
 
 另外这个环境的 `Stop-Process` 有包装限制，对动态 PID 会报 `must specify at least one process using -Id`。**改用 `$proc.Kill()`。**
 
+## 8b. Windows 端 UI 自动化（自绘控件）
+
+这个项目的按钮是 `ModernButton`（继承 `Control` 自绘），**不是标准 `Button`**，UIA 表现如下：
+
+| 控件 | UIA ControlType | 支持的模式 |
+|---|---|---|
+| `ModernButton` | `Pane` | **只有点击坐标**，没有 InvokePattern |
+| `TrackBar` | `Slider` | **不支持 RangeValuePattern** |
+| `Label` | `Text` | 只读 |
+
+**正确做法：**
+
+```powershell
+# 1. 按名字找元素，拿最新 BoundingRectangle（不要缓存！）
+$btn = $all | Where-Object { $_.Current.Name -match '静音' } | Select-Object -First 1
+$r = $btn.Current.BoundingRectangle
+# 2. 算中心，SetForegroundWindow 后 mouse_event 点击
+```
+
+**两个坑：**
+
+1. **按钮文字一变，宽度就变** —— 「静音」→「取消静音」会让 `rect.X` 跳 600+ 像素。
+   每次操作前必须重新查 `BoundingRectangle`，不能复用上一次的坐标。
+2. **`TrackBar` 不要用鼠标点轨道** —— 点击位置到值的映射不准（实测点 0.75 位置
+   得到 +10 而不是 +6）。可靠做法是 `SetFocus()` 然后发 `VK_LEFT` / `VK_RIGHT`
+   （`SmallChange = 1` 时每按一次正好 1 dB）。
+
+**Windows 端窗口坐标是稳定的**（不像手机 UI 会因面板折叠而位移），
+所以 UIA 拿到的 `BoundingRectangle` 可以直接算中心点。
+
+## 8c. 命名管道客户端会阻塞
+
+给宿主发命令时，`NamedPipeClientStream` 用 `PipeDirection::Out` 单工，
+**不要读**（`StreamReader.Peek()` 在无数据时会阻塞，导致整个命令挂死）。
+只需要写命令时：
+
+```powershell
+$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MicCastReceiver.Backend',
+    [System.IO.Pipes.PipeDirection]::Out)
+$pipe.Connect(3000)
+$writer = New-Object System.IO.StreamWriter($pipe); $writer.AutoFlush = $true
+$writer.WriteLine('{"cmd":"mute","muted":true}')
+```
+
+验证结果用 `MicCastReceiver.exe --status`，别在管道里读。
+
 ## 9. 构建缓存不要入库
 
 - 根目录和 `harmony/` 下的 `.hvigor/` 都是构建缓存，必须 gitignore
