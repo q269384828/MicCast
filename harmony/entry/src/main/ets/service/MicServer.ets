@@ -218,14 +218,29 @@ export class MicServer {
   }
 
   private onClientConnected(conn: socket.TCPSocketConnection): void {
+    const prev: socket.TCPSocketConnection | undefined = this.conn;
+    if (prev !== undefined && prev !== conn) {
+      Logger.log('server', `superseding previous connection (clientId=${prev.clientId})`);
+    }
     Logger.log('server', `client connected (clientId=${conn.clientId})`);
     this.conn = conn;
     this.rx = new Uint8Array(0);
     this.handshakeStep = 0;
     conn.on('message', (info: socket.SocketMessageInfo) => {
+      // 旧连接若还在，它的消息不能进同一个 rx 缓冲，否则两路数据交错会解析出垃圾帧
+      if (this.conn !== conn) {
+        return;
+      }
       this.onData(new Uint8Array(info.message));
     });
     conn.on('close', () => {
+      // PC 端重连会先建新连接、旧连接稍后才真正断开。
+      // 这里不认领「自己是不是当前连接」的话，旧连接的 close 会把新连接
+      // this.conn 清成 undefined 并停掉采集 —— 表现为「重连后好一阵没声音」。
+      if (this.conn !== conn) {
+        Logger.log('server', `stale connection closed (clientId=${conn.clientId}), ignored`);
+        return;
+      }
       Logger.log('server', 'client disconnected');
       this.stopPing();
       this.conn = undefined;
@@ -244,6 +259,9 @@ export class MicServer {
     const attachClient = (ip: string): void => {
       this.clientIp = ip;
       this.state = ServerState.ClientConnected;
+      // 连上就把上次的报错清掉：早先的失败是「上一次连接」的事，
+      // 留在界面上会变成「明明能用却写着拿不到地址」。
+      this.lastError = '';
       this.stateHandler();
       this.clientHandler(ip);
     };
@@ -258,6 +276,13 @@ export class MicServer {
           Logger.log('server', `client ip (retry) = ${addr2.address}`);
           attachClient(addr2.address);
         }).catch((err2: Object) => {
+          // 旧连接的失败不该污染当前连接的状态。
+          // PC 端重连时经常「一个连接成功、一个连接拿地址失败」，
+          // 不加这个判断就会出现「功能正常但界面报错」。
+          if (this.conn !== conn) {
+            Logger.log('server', `stale connection: getRemoteAddress retry failed, ignored`);
+            return;
+          }
           Logger.log('server', `getRemoteAddress retry failed: ${err2}`);
           this.lastError = '拿不到电脑端地址，请在电脑上重连一次';
           this.state = ServerState.Listening;

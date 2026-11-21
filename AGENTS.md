@@ -114,9 +114,43 @@ Get-Process TextInputHost | Select-Object -ExpandProperty Modules |
 
 **长时任务**：`BackgroundTaskGuard` 申请 `AUDIO_RECORDING`，必须在**前台**启动录音后再申请。实测息屏 25 秒帧率稳定 196→202，丢包 0.00%，无断流。
 
-## 7. 往手机传文件：App 读不到 `/data/local/tmp`
+## 6b. `MicServer` 只容许一个客户端，但 `onClientConnected` 会被调多次
 
-`hdc file send` 到 `/data/local/tmp` 只有 shell 可读，媒体 App 拿不到内容（表现为能显示文件名，但 `totaltime` 恒为 `00:00`、点播放报「未找到文件」）。
+PC 端重启/重连时，**新连接先建立、旧连接稍后才真正断开**，于是短时间内有两个活连接。
+原来每个回调都无条件改共享状态，造成一串连锁问题：
+
+| 症状 | 原因 |
+|---|---|
+| 「界面上写着拿不到电脑端地址，但其实可以正常使用」 | 旧连接的 `getRemoteAddress` 重试失败，`catch` 把 `lastError` 和 `state=Listening` 写进了**共享**字段，而新连接明明成功 |
+| 重连后好一阵没声音 | 旧连接的 `close` 无条件 `this.conn = undefined` 并调 `disconnectHandler()`，把新连接也一起清掉、停采集 |
+| 偶发解析出垃圾帧 | 两个连接的 `on('message')` 都往同一个 `this.rx` 里塞数据，两路 TCP 字节流交错 |
+
+**修法：所有回调先认领「自己还是不是当前连接」。**
+
+```typescript
+conn.on('message', (info) => {
+  if (this.conn !== conn) return;          // 旧连接的数据不进 rx
+  this.onData(new Uint8Array(info.message));
+});
+conn.on('close', () => {
+  if (this.conn !== conn) return;          // 旧连接不许清新连接
+  ...
+});
+// getRemoteAddress 的 catch 里同样判断
+```
+
+**另外 `attachClient` 里必须 `this.lastError = ''`** —— 报错是「上一次连接」的事，
+不清掉就会变成「明明能用却一直挂着错误提示」。
+
+日志里的判别特征（同一毫秒既有失败又有成功）：
+
+```
+00:53:29.129  getRemoteAddress failed, retry after 200ms
+00:53:29.129  client ip = 192.168.3.95      <- 另一条连接的 then
+00:53:29.339  getRemoteAddress retry failed
+```
+
+## 7. 往手机传文件：App 读不到 `/data/local/tmp``hdc file send` 到 `/data/local/tmp` 只有 shell 可读，媒体 App 拿不到内容（表现为能显示文件名，但 `totaltime` 恒为 `00:00`、点播放报「未找到文件」）。
 
 要让播放器真正加载：
 
