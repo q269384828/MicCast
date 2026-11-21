@@ -358,7 +358,7 @@ struct Index {
           .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: -10 })))
         }
       }
-      .width('100%')
+      .width(`calc(100% - ${Tokens.pagePadding * 2}vp)`)
       .padding({ left: Tokens.cardPadding, right: Tokens.cardPadding, top: Tokens.cardPadding, bottom: Tokens.cardPadding })
       .linearGradient({
         angle: 135,
@@ -621,7 +621,7 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
         }
         .width('100%')
-        .padding({ left: Tokens.cardPadding, right: Tokens.cardPadding, top: Tokens.cardGap, bottom: Tokens.space8 })
+        .padding({ left: Tokens.pagePadding, right: Tokens.pagePadding, top: Tokens.cardGap, bottom: Tokens.space8 })
         .constraintSize({ minHeight: '100%' })
         .justifyContent(FlexAlign.Start)
       }

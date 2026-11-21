@@ -150,6 +150,30 @@ conn.on('close', () => {
 00:53:29.339  getRemoteAddress retry failed
 ```
 
+## 6c. ArkUI 里 `width('100%')` 加 `margin` 不会收缩，会溢出被裁
+
+```typescript
+Column() { /* 渐变 Hero */ }
+  .width('100%')                                        // 宽度 = 父容器
+  .margin({ left: 20, right: 20 })                       // 再往外推 20
+  .borderRadius(22)
+```
+
+**结果不是"左右各留 20"，而是宽度撑满父容器、再被 margin 推出去，
+两边直接被屏幕边缘裁掉。** 大圆角和渐变让它看起来像"故意出血"，很容易漏掉 ——
+这次就是"手机顶部 Hero 左右贴边"的实际原因，而不是边距给小了。
+
+三种正确写法，按场合选：
+
+| 写法 | 说明 |
+|---|---|
+| `.width(\`calc(100% - ${Tokens.pagePadding * 2}vp)\`)` + margin | 改动最小，宽度自己算 |
+| 外面包一层 `Column().width('100%').padding({left,right})` | 结构最清晰，但要多一层 |
+| 父容器用 `padding` 而不是 `margin` | Scroll 内的卡片一直是这么做的，所以没出问题 |
+
+**自检方法**：同一屏里如果有的块用 `padding`、有的用 `margin`，一定要比对两者的左边缘是否对齐。
+这次 Hero 用 margin（错）+ 卡片用 padding（对），截图里 Hero 左边缘比卡片靠外约 50px，一眼能看出来。
+
 ## 7. 往手机传文件：App 读不到 `/data/local/tmp``hdc file send` 到 `/data/local/tmp` 只有 shell 可读，媒体 App 拿不到内容（表现为能显示文件名，但 `totaltime` 恒为 `00:00`、点播放报「未找到文件」）。
 
 要让播放器真正加载：
