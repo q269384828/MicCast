@@ -47,10 +47,11 @@ public sealed class AudioPlayer : IDisposable
     {
         LatencyProfile.Low => (15, 60, 15),
         LatencyProfile.Stable => (50, 250, 40),
-        // Balanced：min 从 15 提到 28。
-        // 实测 min=15 时 target≈30ms，仍每秒欠载 5ms（抖动长尾超出 3σ 水位）。
-        // 语音场景多加 13ms 延迟完全听不出来，但能消掉每秒一次的咔哒声。
-        _ => (28, 120, 20)
+        // Balanced：min 依次 15 → 28 → 42。
+        // 实测 min=28 时系统还得靠欠载惩罚把 target 顶到 ~50 才稳，
+        // 等于启动后先撞几十次墙再自学；直接把起点放到 42 省掉这段。
+        // 多 14ms 延迟在语音里听不出来。
+        _ => (42, 120, 20)
     };
 
     public void Start(int deviceIndex, int sampleRate, int bits, int channels)
@@ -87,17 +88,22 @@ public sealed class AudioPlayer : IDisposable
             }
 
             _output.Init(_buffer);
-            // 先垫一段静音，避免播放起步瞬间连续欠载。
-            // 多垫 30ms：WASAPI 一启动就会连着读好几次，而手机端第一批包还在路上，
-            // 垫不够就会在启动阶段积一堆欠载，把自适应水位顶到上限。
-            _buffer.PrimeSilence(p.MinTarget + p.WasapiLatency + 30);
-            _output.Play();
+            // 垫一段静音当启动缓冲，但先不起播：
+            // 协议协商完成时手机端的采集器往往还没出第一帧，这时 Play 只会
+            // 对着空缓冲连续欠载（实测能积 1 秒多），把自适应水位一路顶到上限。
+            // 起播推迟到 Write 收到首个音频包（见 Write）。
+            int primeMs = p.MinTarget + p.WasapiLatency;
+            _buffer.PrimeSilence(primeMs);
+            _buffer.SetTarget(primeMs);
+            _primed = true;
             LastDeviceName = deviceName ?? "默认设备";
             SampleRate = sampleRate;
             Bits = bits;
             Channels = channels;
         }
     }
+
+    private bool _primed;
 
     public string LastDeviceName { get; private set; } = string.Empty;
     public int SampleRate { get; private set; } = Protocol.SampleRate;
@@ -115,19 +121,18 @@ public sealed class AudioPlayer : IDisposable
             // 电平跟着实际送进声卡的数据走：静音时界面应该显示 0，
             // 而不是继续显示麦克风原来的音量。
             Level = ComputeRms(processed);
+
+            // 首个真实音频包到达才起播，避免对着空缓冲干读
+            if (_primed)
+            {
+                _primed = false;
+                _output?.Play();
+            }
         }
     }
 
-    private volatile bool _muted;
     private volatile float _gainFactor = 1f;
     private double _gainDb;
-
-    /// <summary>静音：仍然写入等长静音帧，保持 tick 连续，避免缓冲欠载。</summary>
-    public bool Muted
-    {
-        get => _muted;
-        set => _muted = value;
-    }
 
     /// <summary>软件增益，单位 dB，范围建议 -12 ~ +12。0 表示原样输出。</summary>
     public double GainDb
@@ -142,7 +147,6 @@ public sealed class AudioPlayer : IDisposable
 
     private byte[] ApplyProcessing(byte[] pcm)
     {
-        if (_muted) return new byte[pcm.Length];
         if (Math.Abs(_gainDb) < 0.01) return pcm;
 
         float factor = _gainFactor;
@@ -166,6 +170,12 @@ public sealed class AudioPlayer : IDisposable
     public double DroppedMilliseconds => _buffer?.DroppedMilliseconds ?? 0;
     public long UnderrunCount => _buffer?.UnderrunCount ?? 0;
     public double UnderrunMilliseconds => _buffer?.UnderrunMilliseconds ?? 0;
+
+    /// <summary>诊断：WasapiOut 一次 Read 的最大帧数（× 1/16 ms = 单次拉取跨度）。</summary>
+    public int MaxReadFrames => _buffer?.MaxReadFrames ?? 0;
+
+    /// <summary>诊断：欠载时缓冲里平均剩余的帧数。</summary>
+    public double AverageAvailableAtUnderrun => _buffer?.AverageAvailableAtUnderrun ?? 0;
     public double PlaybackRate => _buffer?.CurrentRate ?? 1.0;
     public double AveragePlaybackRate => _buffer?.AverageRate ?? 1.0;
     public double LossPercent => _buffer?.LossPercent ?? 0;
@@ -192,6 +202,7 @@ public sealed class AudioPlayer : IDisposable
         try { _output?.Dispose(); } catch { }
         _output = null;
         _buffer = null;
+        _primed = false;
         Level = 0;
     }
 

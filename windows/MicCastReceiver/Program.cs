@@ -162,7 +162,8 @@ internal static class Program
                 $"fps={pipe.Fps:F0} kbps={pipe.Kbps:F0} loss={pipe.LossPercent:F2}% " +
                 $"buf={pipe.BufferedMs}ms target={pipe.TargetMs}ms jitter={pipe.JitterMs:F1}ms " +
                 $"underrun={pipe.UnderrunMs:F0}ms dropped={pipe.DroppedMs:F0}ms " +
-                $"rate={pipe.AveragePlaybackRate:F3}x device={pipe.DeviceName}");
+                $"rate={pipe.AveragePlaybackRate:F3}x readFrames={pipe.MaxReadFrames} availAtUnderrun={pipe.AvailableAtUnderrun:F0} " +
+                $"device={pipe.DeviceName}");
             var servers = pipe.Servers;
             Console.WriteLine($"servers={servers.Count}");
             foreach (var s in servers) Console.WriteLine($"  {s.Name}|{s.Ip}|v{s.Version}");

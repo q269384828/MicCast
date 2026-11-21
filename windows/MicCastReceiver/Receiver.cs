@@ -40,6 +40,8 @@ public sealed class Receiver : IDisposable
     public double DroppedMs => _player.DroppedMilliseconds;
     public long UnderrunCount => _player.UnderrunCount;
     public double UnderrunMs => _player.UnderrunMilliseconds;
+    public int MaxReadFrames => _player.MaxReadFrames;
+    public double AvailableAtUnderrun => _player.AverageAvailableAtUnderrun;
     public double PlaybackRate => _player.PlaybackRate;
     public double AveragePlaybackRate => _player.AveragePlaybackRate;
     /// <summary>UDP 层面的丢包率（%，由 StreamData.tick 跳号推断）</summary>
@@ -52,13 +54,6 @@ public sealed class Receiver : IDisposable
     {
         get => _player.Profile;
         set => _player.Profile = value;
-    }
-
-    /// <summary>静音：写入静音帧而不是停写，保持缓冲连续。</summary>
-    public bool Muted
-    {
-        get => _player.Muted;
-        set => _player.Muted = value;
     }
 
     /// <summary>软件增益（dB）。</summary>

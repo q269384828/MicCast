@@ -26,13 +26,14 @@ public interface IBackend : IDisposable
     double JitterMs { get; }
     double UnderrunMs { get; }
     long UnderrunCount { get; }
+    /// <summary>诊断：WasapiOut 单次 Read 的最大帧数（×1/16 ms = 单次拉取跨度）。</summary>
+    int MaxReadFrames { get; }
+    /// <summary>诊断：欠载时缓冲平均剩余帧数，0 说明真见底。</summary>
+    double AvailableAtUnderrun { get; }
     double DroppedMs { get; }
     double AveragePlaybackRate { get; }
     float Level { get; }
     LatencyProfile Profile { get; set; }
-
-    /// <summary>静音：仍写静音帧，不断流。</summary>
-    bool Muted { get; set; }
 
     /// <summary>软件增益，单位 dB（-12 ~ +12），0 表示不处理。</summary>
     double GainDb { get; set; }

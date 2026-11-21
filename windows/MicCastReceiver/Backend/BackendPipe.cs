@@ -25,11 +25,14 @@ public sealed class StatusDto
     public int TargetMs { get; set; }
     public double JitterMs { get; set; }
     public double UnderrunMs { get; set; }
+    /// <summary>诊断：WasapiOut 单次 Read 的最大帧数。</summary>
+    public int MaxReadFrames { get; set; }
+    /// <summary>诊断：欠载时缓冲平均剩余帧数。</summary>
+    public double AvailableAtUnderrun { get; set; }
     public long UnderrunCount { get; set; }
     public double DroppedMs { get; set; }
     public double AveragePlaybackRate { get; set; }
     public float Level { get; set; }
-    public bool Muted { get; set; }
     public double GainDb { get; set; }
     public string Profile { get; set; } = "balanced";
     public List<ServerDto> Servers { get; set; } = new();
@@ -58,8 +61,6 @@ public sealed class CommandDto
     public string Ip { get; set; } = string.Empty;
     public int Device { get; set; } = -1;
     public string Latency { get; set; } = string.Empty;
-    /// <summary>静音开关（cmd=mute 时有效）</summary>
-    public bool? Muted { get; set; }
     /// <summary>增益 dB（cmd=gain 时有效）</summary>
     public double? GainDb { get; set; }
 }
@@ -93,6 +94,8 @@ internal static class BackendJson
         JitterMs = b.JitterMs,
         UnderrunMs = b.UnderrunMs,
         UnderrunCount = b.UnderrunCount,
+        MaxReadFrames = b.MaxReadFrames,
+        AvailableAtUnderrun = b.AvailableAtUnderrun,
         DroppedMs = b.DroppedMs,
         AveragePlaybackRate = b.AveragePlaybackRate,
         Level = b.Level,
@@ -254,9 +257,6 @@ public sealed class BackendServer : IDisposable
                 break;
             case "stop":
                 await _host.StopAsync();
-                break;
-            case "mute":
-                if (cmd.Muted is bool muted) _host.Muted = muted;
                 break;
             case "gain":
                 if (cmd.GainDb is double gainDb) _host.GainDb = Math.Clamp(gainDb, -24.0, 24.0);
@@ -432,6 +432,8 @@ public sealed class PipeBackend : IBackend
     public int TargetMs => S.TargetMs;
     public double JitterMs => S.JitterMs;
     public double UnderrunMs => S.UnderrunMs;
+    public int MaxReadFrames => S.MaxReadFrames;
+    public double AvailableAtUnderrun => S.AvailableAtUnderrun;
     public long UnderrunCount => S.UnderrunCount;
     public double DroppedMs => S.DroppedMs;
     public double AveragePlaybackRate => S.AveragePlaybackRate;
@@ -441,12 +443,6 @@ public sealed class PipeBackend : IBackend
     {
         get => _profile;
         set => _profile = value;
-    }
-
-    public bool Muted
-    {
-        get => S.Muted;
-        set => _ = SendAsync(new CommandDto { Cmd = "mute", Muted = value });
     }
 
     public double GainDb

@@ -72,10 +72,11 @@ public sealed class ReceiverHost : IBackend
         JitterMs = _receiver.JitterMs,
         UnderrunMs = _receiver.UnderrunMs,
         UnderrunCount = _receiver.UnderrunCount,
+        MaxReadFrames = _receiver.MaxReadFrames,
+        AvailableAtUnderrun = _receiver.AvailableAtUnderrun,
         DroppedMs = _receiver.DroppedMs,
         AveragePlaybackRate = _receiver.AveragePlaybackRate,
         Level = _receiver.Level,
-        Muted = _receiver.Muted,
         GainDb = _receiver.GainDb,
         Profile = _profile.ToString().ToLowerInvariant(),
         Servers = _discovery.Servers.Select(s => new ServerDto
@@ -104,6 +105,8 @@ public sealed class ReceiverHost : IBackend
     public double JitterMs => _receiver.JitterMs;
     public double UnderrunMs => _receiver.UnderrunMs;
     public long UnderrunCount => _receiver.UnderrunCount;
+    public int MaxReadFrames => _receiver.MaxReadFrames;
+    public double AvailableAtUnderrun => _receiver.AvailableAtUnderrun;
     public double DroppedMs => _receiver.DroppedMs;
     public double AveragePlaybackRate => _receiver.AveragePlaybackRate;
     public float Level => _receiver.Level;
@@ -115,17 +118,6 @@ public sealed class ReceiverHost : IBackend
         {
             _profile = value;
             _receiver.Profile = value;
-        }
-    }
-
-    public bool Muted
-    {
-        get => _receiver.Muted;
-        set
-        {
-            _receiver.Muted = value;
-            EmitLog(value ? "已静音" : "已取消静音");
-            PublishState();
         }
     }
 

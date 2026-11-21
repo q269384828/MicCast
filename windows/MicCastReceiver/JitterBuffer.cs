@@ -47,6 +47,16 @@ public sealed class JitterBuffer : IWaveProvider
     private double _jitterMs;
     private int _frameCount;
     private int _targetMs;
+    private int _targetDropCooldown;
+    private long _underrunAvailableSum;
+    private int _underrunSamples;
+
+    /// <summary>诊断：一次 Read 请求的最大帧数，即 WasapiOut 的批量拉取粒度。</summary>
+    public int MaxReadFrames { get; private set; }
+
+    /// <summary>诊断：欠载发生时缓冲里平均还剩多少帧。为 0 说明是真见底了。</summary>
+    public double AverageAvailableAtUnderrun =>
+        _underrunSamples == 0 ? 0 : (double)_underrunAvailableSum / _underrunSamples;
 
     private long _overflows;
     private double _droppedMs;
@@ -166,9 +176,25 @@ public sealed class JitterBuffer : IWaveProvider
         {
             _targetMs = Math.Min(desired, _targetMs + 5);
         }
-        else
+        else if (--_targetDropCooldown <= 0)
         {
+            // 回落比上升慢得多（每 5 个包才降 1ms ≈ 40ms/s）：
+            // 从预填充水位降到稳态需要一两秒，期间若真实抖动更大，
+            // desired 会立刻把它顶回去，不会一头扎进欠载区。
+            _targetDropCooldown = 5;
             _targetMs = Math.Max(desired, _targetMs - 1);
+        }
+    }
+
+    /// <summary>
+    /// 把自适应目标对齐到给定水位。启动预填充后调用：
+    /// 否则播放器发现缓冲远高于目标，会按最大速率猛吃，一两秒内既吃光又欠载。
+    /// </summary>
+    public void SetTarget(int milliseconds)
+    {
+        lock (_gate)
+        {
+            _targetMs = Math.Clamp(milliseconds, _minTargetMs, _maxTargetMs);
         }
     }
 
@@ -219,6 +245,8 @@ public sealed class JitterBuffer : IWaveProvider
             int outFrames = count / _blockAlign;
             if (outFrames <= 0) return count;
 
+            if (outFrames > MaxReadFrames) MaxReadFrames = outFrames;
+
             _rate = _frameCount < 20 ? 1.0 : ComputeRate();
             _rateSum += _rate;
             _rateSamples++;
@@ -267,6 +295,8 @@ public sealed class JitterBuffer : IWaveProvider
                 Array.Clear(buffer, offset + produced * _blockAlign, gapBytes);
                 _underruns++;
                 _underrunBytes += gapBytes;
+                _underrunAvailableSum += _filledFrames;
+                _underrunSamples++;
                 // 一次欠载就抬高目标水位，下一帧起生效。
                 // 单次欠载通常丢掉 5ms 音频，但增长要温和 —— 否则启动瞬态那几次欠载
                 // 会一口气把水位推到上限，延迟暴涨后再慢慢回落，来回振荡。
@@ -313,6 +343,9 @@ public sealed class JitterBuffer : IWaveProvider
             _underruns = 0;
             _underrunBytes = 0;
             _underrunPenaltyMs = 0;
+            _underrunAvailableSum = 0;
+            _underrunSamples = 0;
+            _targetDropCooldown = 0;
             _rate = 1.0;
             _rateSum = 0;
             _rateSamples = 0;
