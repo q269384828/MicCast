@@ -319,6 +319,7 @@ internal static class Program
           --ip <手机IP>          直接连接指定手机，跳过自动发现
           --device <索引>        输出设备索引，先用 --list-devices 查看（默认按名字自动选 CABLE Input）
           --autostart            图形界面启动后立即开始接收
+          --minimized            启动后直接藏到托盘，不弹主窗口（配合 --autostart 做开机自启）
           --log <文件路径>       把状态/统计追加写入文件，便于无头验证
           --list-devices         列出所有播放设备后退出
           --discover [秒数]      不开界面，扫描局域网内的手机后退出（默认 6 秒）
@@ -370,6 +371,8 @@ public sealed class StartOptions
     public int DurationSeconds { get; init; }
     /// <summary>没给 --ip 时等自动发现的最长秒数</summary>
     public int DiscoverTimeoutSeconds { get; init; } = 30;
+    /// <summary>启动后直接藏到托盘，不弹主窗口（配合 --autostart 做开机自启）</summary>
+    public bool Minimized { get; init; }
 
     public static StartOptions Parse(string[] args)
     {
@@ -380,6 +383,7 @@ public sealed class StartOptions
         int loopback = 0;
         string theme = string.Empty;
         bool headless = false;
+        bool minimized = false;
         bool status = false;
         bool quiet = false;
         int duration = 0;
@@ -431,6 +435,9 @@ public sealed class StartOptions
                 case "--discover-timeout" when i + 1 < args.Length:
                     int.TryParse(args[++i], out discoverTimeout);
                     break;
+                case "--minimized":
+                    minimized = true;
+                    break;
             }
         }
         return new StartOptions
@@ -438,7 +445,8 @@ public sealed class StartOptions
             Ip = ip, Device = device, AutoStart = auto, LogPath = log,
             LoopbackVerifyMs = loopback, Theme = theme, Latency = latency,
             Headless = headless, Status = status, Quiet = quiet, DurationSeconds = duration,
-            DiscoverTimeoutSeconds = Math.Max(1, discoverTimeout)
+            DiscoverTimeoutSeconds = Math.Max(1, discoverTimeout),
+            Minimized = minimized
         };
     }
 }

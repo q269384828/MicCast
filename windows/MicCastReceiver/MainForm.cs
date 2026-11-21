@@ -60,6 +60,7 @@ public sealed class MainForm : Form
     private readonly List<string> _earlyLogs = new();
     private IDisposable? _stateSubscription;
     private IDisposable? _logSubscription;
+    private TrayController? _tray;
 
     public MainForm() : this(new StartOptions()) { }
 
@@ -116,12 +117,22 @@ public sealed class MainForm : Form
         _uiTimer.Tick += (_, _) => UpdateStats();
         _uiTimer.Start();
 
+        // 托盘常驻：关窗口时藏到这里，图标随连接状态变色
+        _tray = new TrayController(this, _backend);
+
         Shown += async (_, _) =>
         {
             NativeFx.Apply(this, Theme.Current == AppTheme.Dark);
             RefreshBanner();
             DoLayout();
             FlushEarlyLogs();
+
+            // 开机自启：不弹窗口，直接藏到托盘（静默，不弹气泡）
+            if (_options.Minimized && _tray is not null)
+            {
+                _tray.HideToTray(silent: true);
+            }
+
             if (_options.AutoStart && !_backend.WantReceiving)
             {
                 // 仅在后台还没开始接收时才自动启动。
@@ -795,7 +806,30 @@ public sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // 用户点右上角 X：藏到托盘继续后台接收，不退出进程。
+        // UserClosing = 点 X / Alt+F4；None = 直接收到 WM_CLOSE（自动化、第三方工具发来的）。
+        // 关机（WindowsShutDown）和任务管理器结束（TaskManagerClosing）必须放行，
+        // 否则会拖住系统关机。
+        bool userInitiated = e.CloseReason is CloseReason.UserClosing or CloseReason.None;
+        if (_tray is not null && !_tray.ExitRequested && userInitiated)
+        {
+            e.Cancel = true;
+            _tray.HideToTray();
+            return;
+        }
+
+        // 走到这里是真要退出了。留一条记录，方便排查「为什么点 X 就退了」这类问题
+        // （比如某些远程控制工具发的 WM_CLOSE 会被判定成 TaskManagerClosing）。
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(Path.GetTempPath(), "miccast-close.log"),
+                $"{DateTime.Now:HH:mm:ss} EXIT CloseReason={e.CloseReason} tray={(_tray is null ? "NULL" : "ok")} exit={_tray?.ExitRequested}{Environment.NewLine}");
+        }
+        catch { }
+
         _uiTimer.Stop();
+        try { _tray?.Dispose(); } catch { }
         try { _stateSubscription?.Dispose(); } catch { }
         try { _logSubscription?.Dispose(); } catch { }
         try { _backend.Dispose(); } catch { }
