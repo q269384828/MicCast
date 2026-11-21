@@ -45,9 +45,8 @@ public sealed class MainForm : Form
     private readonly Label _serverLine = new();
 
     private readonly ModernButton _startButton = new();
-    private readonly ModernButton _muteButton = new();
     private readonly Label _gainLabel = new();
-    private readonly TrackBar _gainSlider = new();
+    private readonly Slider _gainSlider = new();
 
     private readonly Card _logCard = new();
     private readonly Label _logTitle = new();
@@ -61,6 +60,9 @@ public sealed class MainForm : Form
     private bool _syncingServerBox;
     private bool _installing;
     private readonly List<string> _earlyLogs = new();
+    private readonly Queue<(long StartedAt, double Total)> _underrunHistory = new();
+    private long _lastUnderrunCalcAt;
+    private double _lastUnderrunRate = -1;
     private IDisposable? _stateSubscription;
     private IDisposable? _logSubscription;
     private TrayController? _tray;
@@ -214,7 +216,8 @@ public sealed class MainForm : Form
         _bufValue.Text = "0";
         foreach (var v in new[] { _fpsValue, _kbpsValue, _bufValue })
         {
-            v.Font = new Font("Microsoft YaHei UI", 15f, FontStyle.Bold);
+            // Segoe UI 的数字是等宽的：数值跳动时整行不会左右呼吸
+            v.Font = new Font("Segoe UI", 15f, FontStyle.Bold);
             v.TextAlign = ContentAlignment.BottomLeft;
         }
 
@@ -234,23 +237,15 @@ public sealed class MainForm : Form
         _startButton.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
         _startButton.Click += async (_, _) => await ToggleAsync();
 
-        _muteButton.Text = "静音";
-        _muteButton.Kind = ButtonKind.Subtle;
-        _muteButton.Font = new Font("Microsoft YaHei UI", 9.5f);
-        _muteButton.Click += (_, _) => ToggleMute();
-
         _gainLabel.Text = "增益 0 dB";
         _gainLabel.Font = new Font("Microsoft YaHei UI", 9f);
-        _gainLabel.TextAlign = ContentAlignment.MiddleLeft;
+        // 右对齐贴住滑块：文字宽度随数值变化，靠右才不会被推着左右跳
+        _gainLabel.TextAlign = ContentAlignment.MiddleRight;
 
         // 增益只在前端做一次乘法，改动立刻作用于后续帧，不需要重连。
         _gainSlider.Minimum = -12;
         _gainSlider.Maximum = 12;
-        _gainSlider.TickFrequency = 3;
-        _gainSlider.SmallChange = 1;
-        _gainSlider.LargeChange = 3;
         _gainSlider.Value = 0;
-        _gainSlider.TickStyle = TickStyle.None;
         _gainSlider.ValueChanged += (_, _) =>
         {
             double db = _gainSlider.Value;
@@ -277,7 +272,7 @@ public sealed class MainForm : Form
         _statusCard.Controls.AddRange(new Control[] { _hint, _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine });
         _logCard.Controls.AddRange(new Control[] { _logTitle, _clearLogButton, _logBox });
 
-        Controls.AddRange(new Control[] { _title, _subtitle, _pill, _banner, _deviceCard, _statusCard, _startButton, _muteButton, _gainLabel, _gainSlider, _logCard });
+        Controls.AddRange(new Control[] { _title, _subtitle, _pill, _banner, _deviceCard, _statusCard, _startButton, _gainLabel, _gainSlider, _logCard });
     }
 
     private void ApplyTheme()
@@ -350,12 +345,14 @@ public sealed class MainForm : Form
         y += statusHeight + S(14);
 
         _startButton.SetBounds(pad, y, S(150), S(44));
-        int mx = pad + S(150) + S(10);
-        _muteButton.SetBounds(mx, y, S(96), S(44));
-        mx += S(96) + S(16);
-        _gainLabel.SetBounds(mx, y + S(12), S(92), S(20));
-        mx += S(92) + S(8);
-        _gainSlider.SetBounds(mx, y, Math.Max(S(120), width - (mx - pad)), S(44));
+
+        // 增益是微调项：右对齐成一組，和左侧主操作形成「主-次」平衡，
+        // 而不是让滑块横贯整行、把左侧按钮衬得像半截。
+        int sliderWidth = S(280);
+        int sliderX = pad + width - sliderWidth;
+        int gainLabelWidth = S(88);
+        _gainSlider.SetBounds(sliderX, y, sliderWidth, S(44));
+        _gainLabel.SetBounds(sliderX - gainLabelWidth - S(10), y + S(12), gainLabelWidth, S(20));
         y += S(44) + S(14);
 
         int logHeight = Math.Max(S(120), ClientSize.Height - y - pad);
@@ -394,7 +391,7 @@ public sealed class MainForm : Form
         _refreshButton.SetBounds(w - S(18) - refreshWidth, S(60), refreshWidth, S(38));
 
         _ipCaption.SetBounds(left, S(112), labelWidth + S(8), S(22));
-        _ipBox.SetBounds(x, S(105), S(170), S(34));
+        _ipBox.SetBounds(x, S(105), S(230), S(34));
     }
 
     private void LayoutStatusCard()
@@ -414,15 +411,16 @@ public sealed class MainForm : Form
         if (!running) return;
 
         int columnWidth = (w - left * 2) / 3;
-        _fpsValue.SetBounds(left, S(14), columnWidth, S(26));
-        _fpsCaption.SetBounds(left, S(40), columnWidth, S(16));
-        _kbpsValue.SetBounds(left + columnWidth, S(14), columnWidth, S(26));
-        _kbpsCaption.SetBounds(left + columnWidth, S(40), columnWidth, S(16));
-        _bufValue.SetBounds(left + columnWidth * 2, S(14), columnWidth, S(26));
-        _bufCaption.SetBounds(left + columnWidth * 2, S(40), columnWidth, S(16));
+        // 垂直方向上下留白取接近对称，卡片不再显得内容压在上半截
+        _fpsValue.SetBounds(left, S(20), columnWidth, S(26));
+        _fpsCaption.SetBounds(left, S(46), columnWidth, S(16));
+        _kbpsValue.SetBounds(left + columnWidth, S(20), columnWidth, S(26));
+        _kbpsCaption.SetBounds(left + columnWidth, S(46), columnWidth, S(16));
+        _bufValue.SetBounds(left + columnWidth * 2, S(20), columnWidth, S(26));
+        _bufCaption.SetBounds(left + columnWidth * 2, S(46), columnWidth, S(16));
 
-        _level.SetBounds(left, S(62), w - left * 2, S(10));
-        _serverLine.SetBounds(left, S(78), w - left * 2, S(18));
+        _level.SetBounds(left, S(72), w - left * 2, S(10));
+        _serverLine.SetBounds(left, S(90), w - left * 2, S(18));
     }
 
     private void LayoutLogCard()
@@ -605,58 +603,6 @@ public sealed class MainForm : Form
         try { File.WriteAllText(LastIpFile, ip); } catch { }
     }
 
-    // ===== 静音 / 增益 =====
-
-    private const int HotKeyMuteId = 0x4D43;   // 随便一个进程内唯一 ID
-    private const uint ModAlt = 0x0001;
-    private const uint ModControl = 0x0002;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        // 全局热键：窗口藏到托盘后依然有效，会议中不用切窗口
-        if (!RegisterHotKey(Handle, HotKeyMuteId, ModControl | ModAlt, (uint)Keys.M))
-        {
-            try
-            {
-                File.AppendAllText(
-                    Path.Combine(Path.GetTempPath(), "miccast-hotkey.log"),
-                    $"{DateTime.Now:HH:mm:ss} RegisterHotKey Ctrl+Alt+M 失败（可能被其他程序占用）{Environment.NewLine}");
-            }
-            catch { }
-        }
-    }
-
-    protected override void OnHandleDestroyed(EventArgs e)
-    {
-        try { UnregisterHotKey(Handle, HotKeyMuteId); } catch { }
-        base.OnHandleDestroyed(e);
-    }
-
-    protected override void WndProc(ref Message m)
-    {
-        const int WmHotKey = 0x0312;
-        if (m.Msg == WmHotKey && m.WParam.ToInt32() == HotKeyMuteId)
-        {
-            ToggleMute();
-            return;
-        }
-        base.WndProc(ref m);
-    }
-
-    private void ToggleMute()
-    {
-        // 走 IBackend：如果是 PipeBackend，会发命令给宿主，宿主再改真正的播放器
-        _backend.Muted = !_backend.Muted;
-        UpdateState();
-    }
-
     private async Task ToggleAsync()
     {
         // 重连逻辑已经上移到 ReceiverHost，这里只表达用户意图
@@ -737,13 +683,10 @@ public sealed class MainForm : Form
         bool running = _backend.Connected;
         bool reconnecting = _backend.WantReceiving && !running;
         _startButton.Text = running ? "停止接收" : (reconnecting ? "取消重连" : "开始接收");
-        _startButton.Kind = running ? ButtonKind.Danger : (reconnecting ? ButtonKind.Danger : ButtonKind.Primary);
+        // 停止是可逆的次要动作：描边样式，在窗口背景上轮廓清楚又不抢主色
+        _startButton.Kind = running || reconnecting ? ButtonKind.Ghost : ButtonKind.Primary;
 
-        bool muted = _backend.Muted;
-        _muteButton.Text = muted ? "取消静音" : "静音";
-        _muteButton.Kind = muted ? ButtonKind.Danger : ButtonKind.Subtle;
-
-        // 增益可能被托盘菜单或另一个前端改过，这里回填滑块（防重入）
+        // 增益可能被托盘或另一个前端改过，这里回填滑块（防重入）
         int gainInt = (int)Math.Round(_backend.GainDb);
         if (_gainSlider.Value != gainInt)
         {
@@ -787,11 +730,34 @@ public sealed class MainForm : Form
         }
         else
         {
-            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {_backend.UnderrunMs:F0}ms";
+            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {UnderrunRate(_backend.UnderrunMs):F1}ms/s";
         }
 
         DoLayout();
         Invalidate(true);
+    }
+
+    /// <summary>
+    /// 欠载的累计量只增不减，直接显示会让人以为一直在坏；换算成 5 秒窗口内的
+    /// 速率才反映当下健康度（稳态应该 &lt; 2 ms/s）。
+    /// </summary>
+    private double UnderrunRate(double cumulativeMs)
+    {
+        long now = Environment.TickCount64;
+        // UpdateState 和 UpdateStats 都会调这里，节流一下避免同一时刻重复入队
+        if (_lastUnderrunRate >= 0 && now - _lastUnderrunCalcAt < 250) return _lastUnderrunRate;
+
+        _underrunHistory.Enqueue((now, cumulativeMs));
+        while (_underrunHistory.Count > 2 && now - _underrunHistory.Peek().StartedAt > 5000)
+        {
+            _underrunHistory.Dequeue();
+        }
+        var oldest = _underrunHistory.Peek();
+        double seconds = (now - oldest.StartedAt) / 1000.0;
+        double rate = seconds < 0.5 ? 0 : Math.Max(0, (cumulativeMs - oldest.Total) / seconds);
+        _lastUnderrunCalcAt = now;
+        _lastUnderrunRate = rate;
+        return rate;
     }
 
     private void UpdateStats()
@@ -801,7 +767,7 @@ public sealed class MainForm : Form
             _fpsValue.Text = $"{_backend.Fps:F0}";
             _kbpsValue.Text = $"{_backend.Kbps:F0}";
             _bufValue.Text = $"{_backend.BufferedMs}";
-            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {_backend.UnderrunMs:F0}ms";
+            _serverLine.Text = $"缓冲 {_backend.BufferedMs}ms / 目标 {_backend.TargetMs}ms　抖动 {_backend.JitterMs:F1}ms　丢包 {_backend.LossPercent:F2}%　速率 {_backend.AveragePlaybackRate:F3}x　丢弃 {_backend.DroppedMs:F0}ms　欠载 {UnderrunRate(_backend.UnderrunMs):F1}ms/s";
 
             double level = Math.Clamp(_backend.Level, 0, 1);
             double scaled = level <= 0.0001 ? 0 : Math.Clamp((20 * Math.Log10(level) + 60) / 60, 0, 1);
@@ -819,6 +785,8 @@ public sealed class MainForm : Form
             _fpsValue.Text = "0";
             _kbpsValue.Text = "0";
             _bufValue.Text = "0";
+            _underrunHistory.Clear();
+            _lastUnderrunRate = -1;
             _serverLine.Text = _backend.WantReceiving ? "后台正在重连…" : "";
         }
     }

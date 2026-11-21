@@ -18,7 +18,6 @@ public sealed class TrayController : IDisposable
     private readonly NotifyIcon _icon;
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _toggleItem;
-    private readonly ToolStripMenuItem _muteItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _showItem;
     private IDisposable? _stateSub;
@@ -38,10 +37,6 @@ public sealed class TrayController : IDisposable
             Font = new Font(_form.Font, FontStyle.Bold)
         };
         _toggleItem = new ToolStripMenuItem("开始接收", null, async (_, _) => await ToggleAsync());
-        _muteItem = new ToolStripMenuItem("静音", null, (_, _) => ToggleMute())
-        {
-            ShortcutKeyDisplayString = "Ctrl+Alt+M"
-        };
         _startupItem = new ToolStripMenuItem("开机自启", null, (_, _) => ToggleStartup())
         {
             CheckOnClick = false,
@@ -56,7 +51,6 @@ public sealed class TrayController : IDisposable
             _showItem,
             new ToolStripSeparator(),
             _toggleItem,
-            _muteItem,
             micItem,
             new ToolStripSeparator(),
             _startupItem,
@@ -105,13 +99,6 @@ public sealed class TrayController : IDisposable
         _icon.Icon = StatusIcons.Get(kind);
         _icon.Text = $"MicCast — {label}";
         _toggleItem.Text = s.WantReceiving ? "停止接收" : "开始接收";
-        _muteItem.Text = s.Muted ? "取消静音" : "静音";
-        _muteItem.Checked = s.Muted;
-    }
-
-    private void ToggleMute()
-    {
-        _backend.Muted = !_backend.Muted;
     }
 
     private void ShowWindow()

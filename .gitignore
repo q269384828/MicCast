@@ -42,3 +42,6 @@ Thumbs.db
 
 # 根目录构建缓存
 /.hvigor/
+
+# 无线调试地址（环境相关，不入库）
+/.hdc-connect.local

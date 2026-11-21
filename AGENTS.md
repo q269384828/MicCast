@@ -153,18 +153,19 @@ hdc shell aa start -b com.huawei.hmsapp.music -a MainAbility \
 
 ```powershell
 # 1. 按名字找元素，拿最新 BoundingRectangle（不要缓存！）
-$btn = $all | Where-Object { $_.Current.Name -match '静音' } | Select-Object -First 1
+$btn = $all | Where-Object { $_.Current.Name -match '停止接收' } | Select-Object -First 1
 $r = $btn.Current.BoundingRectangle
 # 2. 算中心，SetForegroundWindow 后 mouse_event 点击
 ```
 
 **两个坑：**
 
-1. **按钮文字一变，宽度就变** —— 「静音」→「取消静音」会让 `rect.X` 跳 600+ 像素。
+1. **按钮文字一变，宽度就变** —— 「开始接收」→「停止接收」会让 `rect.X` 跳动。
    每次操作前必须重新查 `BoundingRectangle`，不能复用上一次的坐标。
-2. **`TrackBar` 不要用鼠标点轨道** —— 点击位置到值的映射不准（实测点 0.75 位置
-   得到 +10 而不是 +6）。可靠做法是 `SetFocus()` 然后发 `VK_LEFT` / `VK_RIGHT`
-   （`SmallChange = 1` 时每按一次正好 1 dB）。
+2. **自绘 `Ui/Slider` 没有 `RangeValuePattern`**（它是个裸 `Control`，UIA 只看到 Pane）。
+   要设增益只能按坐标点轨道位置——和 `TrackBar` 不同，滑块是**双向的**，
+   中点 = 0 dB，左右端分别是 −12 / +12，点哪个位置就是哪个值（1:1 线性映射，无偏）。
+   需要精确值时按窗口宽度算 `sliderX + width * (value + 12) / 24`。
 
 **Windows 端窗口坐标是稳定的**（不像手机 UI 会因面板折叠而位移），
 所以 UIA 拿到的 `BoundingRectangle` 可以直接算中心点。
@@ -180,10 +181,28 @@ $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'MicCastReceiver.B
     [System.IO.Pipes.PipeDirection]::Out)
 $pipe.Connect(3000)
 $writer = New-Object System.IO.StreamWriter($pipe); $writer.AutoFlush = $true
-$writer.WriteLine('{"cmd":"mute","muted":true}')
+$writer.WriteLine('{"cmd":"gain","gainDb":6}')
 ```
 
 验证结果用 `MicCastReceiver.exe --status`，别在管道里读。
+
+## 8d. JitterBuffer 的预填充必须和初始 target 对齐
+
+冷启动时"播放器已经在读、但手机端还没出第一帧"会一路欠载，
+实测能积 1.1~1.4 秒，还把自适应水位顶到上限，听起来像"每几秒咔一下"。两条独立原因：
+
+1. **预填充水位 ≠ 初始 target** —— `PrimeSilence(78)` 之后 `target` 还是 `minTarget(28)`，
+   播放器一开就发现缓冲远超目标，按最大速率（+6%）猛吃，1 秒内吃光再欠载。
+   修法：`PrimeSilence(ms)` 之后调 `SetTarget(ms)` 对齐起算点。
+2. **起播时机太早** —— `ProtoClientConfig` 到达就 `Play()`，但手机端 `createAudioCapturer`
+   还要几百毫秒才出第一帧。
+   修法：`Start()` 只 `Init()` + prime，**推迟到 `Write()` 收到首个真实音频包才 `Play()`**。
+
+另外 target 回落速度要慢（每 5 个包降 1ms ≈ 40ms/s），降太快会一头扎回欠载区。
+
+**判断欠载健康度看速率不看总量**：`underrunMs` 是累计值只增不减，
+刚启动那几十秒的欠载会永远留在计数里。换算成 `ms/s`（5 秒滑动窗口）才有意义，
+稳态应该 < 2 —— 界面上显示的也是这个。
 
 ## 9. 构建缓存不要入库
 
@@ -204,5 +223,7 @@ $writer.WriteLine('{"cmd":"mute","muted":true}')
 - 用 TTS 测 Win+H → 错误结论「引擎缺失」（实际引擎完好，`zh-CN-N` 模型在 `C:\Windows\Speech_OneCore\Engines\SR\`）
 - 硬编码坐标点空 → 错误结论「语音增强能识别」
 - 猜乱码含义 → 错误结论「切到了语音增强」
+- 看到启动期 `underrun=1445ms` → 差点误判「改成 target 42 反而更差」，
+  实际是累计值里含预热期，稳态采样（60 秒增量）才是 0
 
 **任何关于设备状态、UI 状态、音频电平的判断，都要有可复现的证据（截图 / 日志 / 电平测量），不要靠推理链。**

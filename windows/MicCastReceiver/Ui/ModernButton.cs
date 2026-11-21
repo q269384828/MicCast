@@ -98,7 +98,8 @@ public sealed class ModernButton : Control
             case ButtonKind.Ghost:
                 fill = _hover ? Theme.SurfaceAlt : Color.Transparent;
                 text = Enabled ? Theme.TextPrimary : Theme.TextFaint;
-                border = Theme.Border;
+                // 纯 Border 在浅色背景上淡到像禁用，往文字色借一点才有存在感
+                border = Theme.Mix(Theme.Border, Theme.TextFaint, 0.5);
                 break;
             default:
                 fill = _pressed || _hover ? Theme.Mix(Theme.SurfaceAlt, Theme.Border, 0.35) : Theme.SurfaceAlt;
