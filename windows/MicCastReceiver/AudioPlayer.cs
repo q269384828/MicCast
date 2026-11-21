@@ -45,9 +45,12 @@ public sealed class AudioPlayer : IDisposable
 
     private (int MinTarget, int MaxTarget, int WasapiLatency) ProfileParams() => Profile switch
     {
-        LatencyProfile.Low => (10, 50, 15),
+        LatencyProfile.Low => (15, 60, 15),
         LatencyProfile.Stable => (50, 250, 40),
-        _ => (15, 100, 20)
+        // Balanced：min 从 15 提到 28。
+        // 实测 min=15 时 target≈30ms，仍每秒欠载 5ms（抖动长尾超出 3σ 水位）。
+        // 语音场景多加 13ms 延迟完全听不出来，但能消掉每秒一次的咔哒声。
+        _ => (28, 120, 20)
     };
 
     public void Start(int deviceIndex, int sampleRate, int bits, int channels)

@@ -93,9 +93,12 @@ struct Index {
     if (this.stopping) {
       return;
     }
-    const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     await this.sender.stop();
-    await this.bgGuard.stop(ctx);
+    // 故意不停长时任务：鸿蒙要求录音必须在前台启动，长时任务一停，
+    // 息屏/切后台后 App 会被冻结，PC 重连回来时 sender.start() 就起不来了
+    // （表现为 PC 端 connected=True 但 fps=0，一个音频包都收不到）。
+    // 代价是断开期间仍占着 audioRecording 长时任务，但用户随时可能重连，
+    // 保留上下文比反复重建更可靠。
     this.streamingIp = '';
     this.getUIContext().getPromptAction().showToast({ message: '电脑已断开，麦克风已停止' });
     this.refresh();

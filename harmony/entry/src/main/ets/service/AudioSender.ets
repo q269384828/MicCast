@@ -189,13 +189,38 @@ export class AudioSender {
     // 切换采集模式走的是 setMode→startCapturer，不经过这里，所以不会误重置。
     this.startedAt = 0;
 
-    const udp: socket.UDPSocket = socket.constructUDPSocketInstance();
-    // 官方实现「双方各绑本地 59100」：服务端也要从 59100 发出，客户端按源端口过滤
-    await udp.bind({ address: '0.0.0.0', port: AUDIO_PORT, family: 1 });
-    udp.on('message', (info: socket.SocketMessageInfo) => {
+    // 端口 59100 是复用的：上一次连接刚关，系统可能还没彻底释放。
+    // 之前只等 150ms 就 bind，偶尔失败会直接抛异常，表现为「PC 显示已连接但一个音频包都收不到」。
+    // 这里改成带退避的重试。
+    let udp: socket.UDPSocket | undefined = undefined;
+    let bindError: Object | undefined = undefined;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const candidate: socket.UDPSocket = socket.constructUDPSocketInstance();
+      try {
+        // 官方实现「双方各绑本地 59100」：服务端也要从 59100 发出，客户端按源端口过滤
+        await candidate.bind({ address: '0.0.0.0', port: AUDIO_PORT, family: 1 });
+        udp = candidate;
+        if (attempt > 1) {
+          Logger.log('audio', `udp bind succeeded on attempt ${attempt}`);
+        }
+        break;
+      } catch (err) {
+        bindError = err;
+        Logger.log('audio', `udp bind attempt ${attempt} failed: ${err}`);
+        try { await candidate.close(); } catch (closeErr) { }
+        if (attempt < 4) {
+          await new Promise<void>((resolve) => setTimeout(() => resolve(), 250 * attempt));
+        }
+      }
+    }
+    if (udp === undefined) {
+      throw new Error(`UDP 端口 ${AUDIO_PORT} 绑定失败：${bindError}`);
+    }
+    const sock: socket.UDPSocket = udp;
+    sock.on('message', (info: socket.SocketMessageInfo) => {
       this.rxFromServer = this.rxFromServer + 1;
     });
-    this.udp = udp;
+    this.udp = sock;
 
     await this.startCapturer();
     Logger.log('audio', `streaming to ${ip}:${AUDIO_PORT}`);

@@ -26,7 +26,16 @@ public sealed class JitterBuffer : IWaveProvider
     /// <summary>最大速率偏移。6% 时音调变化不到一个半音，语音听不出来。</summary>
     private const double MaxRateDeviation = 0.06;
     /// <summary>水位偏差多少毫秒时达到最大速率偏移</summary>
-    private const double RateFullScaleMs = 100.0;
+    // 变速追平的灵敏度：缓冲水位偏离目标多少毫秒时达到满功率。
+    //
+    // 原值 100ms 太钝：手机端采集时钟实际比名义慢 ~1.5%（fps 197 vs 200），
+    // 按 100ms 满量程要把缓冲压到目标以下 25ms 才能产生 1.5% 的补偿，
+    // 而目标水位只有 32ms —— 缓冲被压到 7ms，任何抖动都直接欠载，
+    // 实测每秒丢 8ms 音频（0.83%）。
+    //
+    // 改成 25ms 后，产生 1.5% 补偿只需 6ms 水位偏差，缓冲仍留 ~26ms 余量。
+    // 不会引入可闻的变速痕迹：Opus/WebRTC 的 NetEq 用的是同一量级的响应速度。
+    private const double RateFullScaleMs = 25.0;
 
     private int _writeFrame;
     private int _readFrame;
@@ -144,7 +153,7 @@ public sealed class JitterBuffer : IWaveProvider
         if (_frameCount < 20) return;
 
         int desired = (int)Math.Clamp(
-            _minTargetMs + _underrunPenaltyMs + 3.0 * _jitterMs,
+            _minTargetMs + _underrunPenaltyMs + 3.5 * _jitterMs,
             _minTargetMs, _maxTargetMs);
 
         // 欠载惩罚缓慢衰减：真断续过就保守一阵子，网络稳了再慢慢降回来。
