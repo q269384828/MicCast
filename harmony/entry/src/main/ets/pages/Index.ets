@@ -4,6 +4,7 @@ import { AudioSender, MicMode, micModeLabel } from '../service/AudioSender';
 import { MicServer } from '../service/MicServer';
 import { BackgroundTaskGuard } from '../service/BackgroundTaskGuard';
 import { Logger } from '../service/Logger';
+import { Tokens } from '../model/Tokens';
 import { AUDIO_PORT } from '../model/Messages';
 
 const MIC_MODES: MicMode[] = [MicMode.Raw, MicMode.VoiceRecog];
@@ -149,8 +150,9 @@ struct Index {
   }
 
   private levelLabel(): string {
+    // 用「无输入」而不是「静音」：静音是会议软件的功能，这里是"当前没收到声音"
     if (this.level <= 0.0005) {
-      return '静音';
+      return '无输入';
     }
     return `${Math.round(20 * Math.log10(this.level))} dB`;
   }
@@ -259,11 +261,11 @@ struct Index {
 
           Column({ space: 3 }) {
             Text('MicCast')
-              .fontSize(22)
+              .fontSize(Tokens.fontHero)
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.on_hero'))
             Text('声渡 · 手机当麦克风')
-              .fontSize(11)
+              .fontSize(Tokens.fontCaption)
               .fontColor($r('app.color.on_hero_soft'))
           }
           .alignItems(HorizontalAlign.Start)
@@ -271,11 +273,11 @@ struct Index {
           Blank()
 
           Text(this.statusText())
-            .fontSize(12)
+            .fontSize(Tokens.fontLabel)
             .fontColor($r('app.color.on_hero'))
             .padding({ left: 12, right: 12, top: 5, bottom: 5 })
             .backgroundColor('#33FFFFFF')
-            .borderRadius(13)
+            .borderRadius(Tokens.radiusPill)
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
@@ -284,11 +286,11 @@ struct Index {
           Column({ space: 6 }) {
             Row() {
               Text('麦克风输入')
-                .fontSize(10)
+                .fontSize(Tokens.fontCaption)
                 .fontColor($r('app.color.on_hero_soft'))
               Blank()
               Text(this.levelLabel())
-                .fontSize(10)
+                .fontSize(Tokens.fontCaption)
                 .fontColor($r('app.color.on_hero_soft'))
             }
             .width('100%')
@@ -316,11 +318,11 @@ struct Index {
             Row() {
               Column({ space: 2 }) {
                 Text(this.uptime)
-                  .fontSize(15)
+                  .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
                   .fontColor($r('app.color.on_hero'))
                 Text('已串流')
-                  .fontSize(9)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.on_hero_soft'))
               }
               .layoutWeight(1)
@@ -328,11 +330,11 @@ struct Index {
 
               Column({ space: 2 }) {
                 Text(`${this.fpsRate}`)
-                  .fontSize(15)
+                  .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
                   .fontColor($r('app.color.on_hero'))
                 Text('帧/秒')
-                  .fontSize(9)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.on_hero_soft'))
               }
               .layoutWeight(1)
@@ -340,11 +342,11 @@ struct Index {
 
               Column({ space: 2 }) {
                 Text(`${this.kbps}`)
-                  .fontSize(15)
+                  .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
                   .fontColor($r('app.color.on_hero'))
                 Text('kbps')
-                  .fontSize(9)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.on_hero_soft'))
               }
               .layoutWeight(1)
@@ -362,7 +364,7 @@ struct Index {
         angle: 135,
         colors: [[$r('app.color.hero_from'), 0.0], [$r('app.color.hero_to'), 1.0]]
       })
-      .borderRadius(22)
+      .borderRadius(Tokens.radiusHero)
       .margin({ left: 16, right: 16, top: 12 })
 
       Scroll() {
@@ -370,20 +372,25 @@ struct Index {
           // ── 主操作 ──────────────────────────────────────
           Column({ space: 14 }) {
             Text(this.hintText())
-              .fontSize(13)
+              .fontSize(Tokens.fontBody)
               .lineHeight(20)
               .fontColor($r('app.color.text_muted'))
               .width('100%')
 
             Button(this.running ? '停止' : '启动麦克风服务')
               .width('100%')
-              .height(48)
-              .fontSize(16)
+              .height(Tokens.buttonHeight)
+              .fontSize(Tokens.fontButton)
               .fontWeight(FontWeight.Medium)
-              .backgroundColor(this.running ? $r('app.color.state_danger') : $r('app.color.accent'))
-              .fontColor($r('app.color.on_accent'))
-              .borderRadius(24)
-              .animation({ duration: 240, curve: Curve.EaseInOut })
+              // 停止是可逆的次要动作，用中性底；红色留给真正的破坏性操作
+              .backgroundColor(this.running ? $r('app.color.card_bg_alt') : $r('app.color.accent'))
+              .fontColor(this.running ? $r('app.color.text_main') : $r('app.color.on_accent'))
+              .borderRadius(Tokens.radiusControl)
+              .border({
+                width: this.running ? 1 : 0,
+                color: $r('app.color.divider')
+              })
+              .animation({ duration: Tokens.durFast, curve: Curve.EaseInOut })
               .stateStyles({
                 pressed: {
                   .scale({ x: 0.97, y: 0.97 })
@@ -400,7 +407,7 @@ struct Index {
 
             if (this.message.length > 0) {
               Text(this.message)
-                .fontSize(12)
+                .fontSize(Tokens.fontLabel)
                 .lineHeight(18)
                 .fontColor($r('app.color.state_warn'))
                 .width('100%')
@@ -414,11 +421,11 @@ struct Index {
             Column({ space: 8 }) {
               Row() {
                 Text('采集模式')
-                  .fontSize(12)
+                  .fontSize(Tokens.fontTitle)
                   .fontColor($r('app.color.text_muted'))
                 Blank()
                 Text(this.streaming ? '切换会让声音断一下' : '')
-                  .fontSize(10)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.text_muted'))
               }
               .width('100%')
@@ -428,11 +435,11 @@ struct Index {
                   Text(micModeLabel(mode))
                     .layoutWeight(1)
                     .height(34)
-                    .fontSize(12.5)
+                    .fontSize(Tokens.fontBody)
                     .textAlign(TextAlign.Center)
                     .fontColor(this.micMode === mode ? $r('app.color.on_accent') : $r('app.color.text_muted'))
                     .backgroundColor(this.micMode === mode ? $r('app.color.accent') : Color.Transparent)
-                    .borderRadius(9)
+                    .borderRadius(Tokens.radiusSmall)
                     .animation({ duration: 180, curve: Curve.EaseOut })
                     .onClick(() => {
                       this.setMicMode(mode);
@@ -441,11 +448,11 @@ struct Index {
               }
               .padding(3)
               .backgroundColor($r('app.color.tile_bg'))
-              .borderRadius(12)
+              .borderRadius(Tokens.radiusControl)
               .width('100%')
 
               Text(this.modeHint())
-                .fontSize(11)
+                .fontSize(Tokens.fontCaption)
                 .lineHeight(16)
                 .fontColor($r('app.color.text_muted'))
                 .width('100%')
@@ -456,7 +463,7 @@ struct Index {
           .width('100%')
           .padding(16)
           .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(18)
+          .borderRadius(Tokens.radiusCard)
           .border({ width: 1, color: $r('app.color.divider') })
           .alignItems(HorizontalAlign.Start)
 
@@ -464,12 +471,12 @@ struct Index {
           Column({ space: 12 }) {
             Row() {
               Text('电脑上怎么用')
-                .fontSize(13)
+                .fontSize(Tokens.fontTitle)
                 .fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.text_main'))
               Blank()
               Text(this.showGuide ? '收起' : '展开')
-                .fontSize(12)
+                .fontSize(Tokens.fontLabel)
                 .fontColor($r('app.color.accent'))
                 .onClick(() => {
                   this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
@@ -482,16 +489,16 @@ struct Index {
             if (this.showGuide) {
               Row({ space: 10 }) {
                 Text('1')
-                  .fontSize(11)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
                   .width(20)
                   .height(20)
                   .backgroundColor($r('app.color.tile_bg'))
-                  .borderRadius(10)
+                  .borderRadius(Tokens.radiusControl)
                 Text('运行电脑上的 MicCastReceiver.exe')
-                  .fontSize(12.5)
+                  .fontSize(Tokens.fontBody)
                   .lineHeight(20)
                   .fontColor($r('app.color.text_muted'))
                   .layoutWeight(1)
@@ -502,16 +509,16 @@ struct Index {
 
               Row({ space: 10 }) {
                 Text('2')
-                  .fontSize(11)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
                   .width(20)
                   .height(20)
                   .backgroundColor($r('app.color.tile_bg'))
-                  .borderRadius(10)
+                  .borderRadius(Tokens.radiusControl)
                 Text('设备列表里选中本机，点「开始接收」')
-                  .fontSize(12.5)
+                  .fontSize(Tokens.fontBody)
                   .lineHeight(20)
                   .fontColor($r('app.color.text_muted'))
                   .layoutWeight(1)
@@ -522,16 +529,16 @@ struct Index {
 
               Row({ space: 10 }) {
                 Text('3')
-                  .fontSize(11)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
                   .width(20)
                   .height(20)
                   .backgroundColor($r('app.color.tile_bg'))
-                  .borderRadius(10)
+                  .borderRadius(Tokens.radiusControl)
                 Text('输出设备选 CABLE Input')
-                  .fontSize(12.5)
+                  .fontSize(Tokens.fontBody)
                   .lineHeight(20)
                   .fontColor($r('app.color.text_muted'))
                   .layoutWeight(1)
@@ -542,16 +549,16 @@ struct Index {
 
               Row({ space: 10 }) {
                 Text('4')
-                  .fontSize(11)
+                  .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
                   .width(20)
                   .height(20)
                   .backgroundColor($r('app.color.tile_bg'))
-                  .borderRadius(10)
+                  .borderRadius(Tokens.radiusControl)
                 Text('微信 / 腾讯会议 / Win+H 的麦克风选 CABLE Output')
-                  .fontSize(12.5)
+                  .fontSize(Tokens.fontBody)
                   .lineHeight(20)
                   .fontColor($r('app.color.text_muted'))
                   .layoutWeight(1)
@@ -564,7 +571,7 @@ struct Index {
           .width('100%')
           .padding(16)
           .backgroundColor($r('app.color.card_bg'))
-          .borderRadius(18)
+          .borderRadius(Tokens.radiusCard)
           .border({ width: 1, color: $r('app.color.divider') })
           .alignItems(HorizontalAlign.Start)
 
@@ -572,12 +579,12 @@ struct Index {
           Column({ space: 8 }) {
             Row() {
               Text('运行日志')
-                .fontSize(12)
+                .fontSize(Tokens.fontLabel)
                 .fontColor($r('app.color.text_muted'))
               Blank()
               if (this.showLogs) {
                 Text('清空')
-                  .fontSize(12)
+                  .fontSize(Tokens.fontLabel)
                   .fontColor($r('app.color.accent'))
                   .margin({ right: 14 })
                   .onClick(() => {
@@ -586,7 +593,7 @@ struct Index {
                   })
               }
               Text(this.showLogs ? '收起' : '展开')
-                .fontSize(12)
+                .fontSize(Tokens.fontLabel)
                 .fontColor($r('app.color.accent'))
                 .onClick(() => {
                   this.getUIContext().animateTo({ duration: 220, curve: Curve.EaseInOut }, () => {
@@ -600,7 +607,7 @@ struct Index {
             if (this.showLogs) {
               ForEach(this.logs, (line: string) => {
                 Text(line)
-                  .fontSize(10)
+                  .fontSize(Tokens.fontCaption)
                   .lineHeight(15)
                   .fontColor($r('app.color.log_text'))
                   .width('100%')
@@ -610,7 +617,7 @@ struct Index {
           .width('100%')
           .padding(14)
           .backgroundColor($r('app.color.log_bg'))
-          .borderRadius(18)
+          .borderRadius(Tokens.radiusCard)
           .alignItems(HorizontalAlign.Start)
         }
         .width('100%')

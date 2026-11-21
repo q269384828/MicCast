@@ -13,6 +13,7 @@ public sealed class MainForm : Form
     private readonly IBackend _backend;
     private readonly StartOptions _options;
 
+    private readonly Hero _hero = new();
     private readonly Label _title = new();
     private readonly Label _subtitle = new();
     private readonly StatusPill _pill = new();
@@ -33,7 +34,6 @@ public sealed class MainForm : Form
     private readonly TextField _ipBox = new();
     private readonly ModernButton _refreshButton = new();
 
-    private readonly Card _statusCard = new();
     private readonly Label _hint = new();
     private readonly Label _fpsValue = new();
     private readonly Label _kbpsValue = new();
@@ -94,6 +94,7 @@ public sealed class MainForm : Form
         BackColor = Theme.WindowBg;
         ForeColor = Theme.TextPrimary;
         ApplyWindowIcon();
+        _hero.BrandMark = LoadBrandMark(S(_hero.IconSize));
 
         BuildControls();
         ApplyTheme();
@@ -159,12 +160,14 @@ public sealed class MainForm : Form
     private void BuildControls()
     {
         _title.Text = "MicCast";
-        _title.Font = new Font("Microsoft YaHei UI", 17f, FontStyle.Bold);
+        _title.Font = Theme.MakeFont(Theme.FontHero, FontStyle.Bold);
         _title.AutoSize = true;
+        _title.ForeColor = Theme.OnHero;
 
         _subtitle.Text = "声渡 · 把手机麦克风变成一个 Windows 麦克风";
-        _subtitle.Font = new Font("Microsoft YaHei UI", 9f);
+        _subtitle.Font = Theme.MakeFont(Theme.FontCaption);
         _subtitle.AutoSize = true;
+        _subtitle.ForeColor = Theme.OnHeroSoft;
 
         _bannerTitle.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
         _bannerText.Font = new Font("Microsoft YaHei UI", 9f);
@@ -216,9 +219,10 @@ public sealed class MainForm : Form
         _bufValue.Text = "0";
         foreach (var v in new[] { _fpsValue, _kbpsValue, _bufValue })
         {
-            // Segoe UI 的数字是等宽的：数值跳动时整行不会左右呼吸
-            v.Font = new Font("Segoe UI", 15f, FontStyle.Bold);
+            // 等宽数字：数值跳动时整行不会左右呼吸
+            v.Font = Theme.MakeNumeric(Theme.FontMetric);
             v.TextAlign = ContentAlignment.BottomLeft;
+            v.ForeColor = Theme.OnHero;
         }
 
         _fpsCaption.Text = "帧/秒";
@@ -226,19 +230,21 @@ public sealed class MainForm : Form
         _bufCaption.Text = "毫秒缓冲";
         foreach (var c in new[] { _fpsCaption, _kbpsCaption, _bufCaption })
         {
-            c.Font = new Font("Microsoft YaHei UI", 8.5f);
+            c.Font = Theme.MakeFont(Theme.FontCaption);
             c.TextAlign = ContentAlignment.TopLeft;
+            c.ForeColor = Theme.OnHeroSoft;
         }
 
-        _serverLine.Font = new Font("Microsoft YaHei UI", 8.5f);
+        _serverLine.Font = Theme.MakeFont(Theme.FontCaption);
+        _serverLine.ForeColor = Theme.OnHeroSoft;
 
         _startButton.Text = "开始接收";
         _startButton.Kind = ButtonKind.Primary;
-        _startButton.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
+        _startButton.Font = Theme.MakeFont(Theme.FontTitle, FontStyle.Bold);
         _startButton.Click += async (_, _) => await ToggleAsync();
 
         _gainLabel.Text = "增益 0 dB";
-        _gainLabel.Font = new Font("Microsoft YaHei UI", 9f);
+        _gainLabel.Font = Theme.MakeFont(Theme.FontBody);
         // 右对齐贴住滑块：文字宽度随数值变化，靠右才不会被推着左右跳
         _gainLabel.TextAlign = ContentAlignment.MiddleRight;
 
@@ -267,12 +273,12 @@ public sealed class MainForm : Form
         _logBox.Font = new Font("Consolas", 8.75f);
         _logBox.WordWrap = true;
 
+        _hero.Controls.AddRange(new Control[] { _title, _subtitle, _pill, _hint, _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine });
         _banner.Controls.AddRange(new Control[] { _bannerTitle, _bannerText, _installButton, _openPageButton, _recheckButton });
         _deviceCard.Controls.AddRange(new Control[] { _serverCaption, _serverBox, _deviceCaption, _deviceBox, _ipCaption, _ipBox, _refreshButton });
-        _statusCard.Controls.AddRange(new Control[] { _hint, _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine });
         _logCard.Controls.AddRange(new Control[] { _logTitle, _clearLogButton, _logBox });
 
-        Controls.AddRange(new Control[] { _title, _subtitle, _pill, _banner, _deviceCard, _statusCard, _startButton, _gainLabel, _gainSlider, _logCard });
+        Controls.AddRange(new Control[] { _hero, _banner, _deviceCard, _startButton, _gainLabel, _gainSlider, _logCard });
     }
 
     private void ApplyTheme()
@@ -280,84 +286,116 @@ public sealed class MainForm : Form
         BackColor = Theme.WindowBg;
         ForeColor = Theme.TextPrimary;
 
-        _title.ForeColor = Theme.TextPrimary;
-        _subtitle.ForeColor = Theme.TextSecondary;
-
-        foreach (var card in new[] { _banner, _deviceCard, _statusCard, _logCard })
+        foreach (var card in new[] { _banner, _deviceCard, _logCard })
         {
             card.ApplyTheme();
         }
+        _hero.ApplyTheme();
 
-        foreach (var label in new[]
-                 {
-                     _bannerText, _serverCaption, _deviceCaption, _ipCaption, _fpsCaption, _kbpsCaption,
-                     _bufCaption, _serverLine, _logTitle
-                 })
+        // Hero 内的文字在渐变底上，用 on-hero 系列
+        _title.ForeColor = Theme.OnHero;
+        _subtitle.ForeColor = Theme.OnHeroSoft;
+        _hint.ForeColor = Theme.OnHeroSoft;
+        foreach (var v in new[] { _fpsValue, _kbpsValue, _bufValue }) v.ForeColor = Theme.OnHero;
+        foreach (var c in new[] { _fpsCaption, _kbpsCaption, _bufCaption }) c.ForeColor = Theme.OnHeroSoft;
+        _serverLine.ForeColor = Theme.OnHeroSoft;
+        _level.BackColor = Color.Transparent;
+        _pill.BackColor = Color.Transparent;
+
+        // 卡片内的文字在白底上
+        foreach (var label in new[] { _bannerText, _serverCaption, _deviceCaption, _ipCaption, _logTitle })
         {
             label.BackColor = Theme.Surface;
             label.ForeColor = Theme.TextSecondary;
         }
-
-        foreach (var label in new[] { _bannerTitle, _fpsValue, _kbpsValue, _bufValue, _hint })
-        {
-            label.BackColor = Theme.Surface;
-            label.ForeColor = Theme.TextPrimary;
-        }
+        _bannerTitle.BackColor = Theme.Surface;
+        _bannerTitle.ForeColor = Theme.TextPrimary;
 
         _serverBox.BackColor = Theme.Surface;
         _deviceBox.BackColor = Theme.Surface;
         _ipBox.ApplyTheme();
-        _level.BackColor = Theme.Surface;
 
         _logBox.BackColor = Theme.LogBg;
-        _logBox.ForeColor = Theme.TextSecondary;
-
-        _pill.BackColor = Theme.WindowBg;
+        _logBox.ForeColor = Theme.LogText;
 
         Invalidate(true);
     }
 
     private void DoLayout()
     {
-        int pad = S(22);
+        int pad = S(Theme.PagePadding);
+        int gap = S(Theme.CardGap);
         int width = ClientSize.Width - pad * 2;
 
-        int y = S(16);
-        _title.Location = new Point(pad + S(44), y);
-        _subtitle.Location = new Point(pad + S(45), y + S(28));
-        _pill.Location = new Point(ClientSize.Width - pad - _pill.Width, y + S(14));
-        y += S(58);
+        int y = gap;
+
+        int heroHeight = S(_backend.Connected ? 196 : 116);
+        _hero.SetBounds(pad, y, width, heroHeight);
+        LayoutHero();
+        y += heroHeight + gap;
 
         if (_banner.Visible)
         {
             _banner.SetBounds(pad, y, width, S(104));
             LayoutBanner();
-            y += S(104) + S(14);
+            y += S(104) + gap;
         }
 
-        _deviceCard.SetBounds(pad, y, width, S(150));
-        LayoutDeviceCard();
-        y += S(150) + S(14);
-
-        int statusHeight = _backend.Connected ? S(132) : S(74);
-        _statusCard.SetBounds(pad, y, width, statusHeight);
-        LayoutStatusCard();
-        y += statusHeight + S(14);
-
+        // 主操作 + 增益（增益是微调项，右对齐成一組）
         _startButton.SetBounds(pad, y, S(150), S(44));
-
-        // 增益是微调项：右对齐成一組，和左侧主操作形成「主-次」平衡，
-        // 而不是让滑块横贯整行、把左侧按钮衬得像半截。
         int sliderWidth = S(280);
         int sliderX = pad + width - sliderWidth;
         int gainLabelWidth = S(88);
         _gainSlider.SetBounds(sliderX, y, sliderWidth, S(44));
-        _gainLabel.SetBounds(sliderX - gainLabelWidth - S(10), y + S(12), gainLabelWidth, S(20));
-        y += S(44) + S(14);
+        _gainLabel.SetBounds(sliderX - gainLabelWidth - S(Theme.Space3), y + S(12), gainLabelWidth, S(20));
+        y += S(44) + gap;
+
+        _deviceCard.SetBounds(pad, y, width, S(150));
+        LayoutDeviceCard();
+        y += S(150) + gap;
 
         int logHeight = Math.Max(S(120), ClientSize.Height - y - pad);
         _logCard.SetBounds(pad, y, width, logHeight);
         LayoutLogCard();
+    }
+
+    private void LayoutHero()
+    {
+        int w = _hero.Width;
+        int pad = S(Theme.CardPadding);
+        int iconSize = S(_hero.IconSize);
+        int textX = pad + iconSize + S(Theme.Space2);
+
+        // 品牌行：图标由 Hero 自绘，文字和胶囊走布局
+        _title.Location = new Point(textX, S(14));
+        _subtitle.Location = new Point(textX + S(1), S(14) + _title.Height - S(2));
+        _pill.Location = new Point(w - pad - _pill.Width, S(20));
+
+        bool running = _backend.Connected;
+        _hint.Visible = !running;
+        foreach (var c in new Control[] { _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine })
+        {
+            c.Visible = running;
+        }
+
+        if (!running)
+        {
+            _hint.SetBounds(pad, S(62), w - pad * 2, S(40));
+            return;
+        }
+
+        _level.SetBounds(pad, S(78), w - pad * 2, S(8));
+
+        int metricY = S(100);
+        int columnWidth = (w - pad * 2) / 3;
+        _fpsValue.SetBounds(pad, metricY, columnWidth, S(26));
+        _fpsCaption.SetBounds(pad, metricY + S(26), columnWidth, S(16));
+        _kbpsValue.SetBounds(pad + columnWidth, metricY, columnWidth, S(26));
+        _kbpsCaption.SetBounds(pad + columnWidth, metricY + S(26), columnWidth, S(16));
+        _bufValue.SetBounds(pad + columnWidth * 2, metricY, columnWidth, S(26));
+        _bufCaption.SetBounds(pad + columnWidth * 2, metricY + S(26), columnWidth, S(16));
+
+        _serverLine.SetBounds(pad, S(166), w - pad * 2, S(18));
     }
 
     private void LayoutBanner()
@@ -392,35 +430,6 @@ public sealed class MainForm : Form
 
         _ipCaption.SetBounds(left, S(112), labelWidth + S(8), S(22));
         _ipBox.SetBounds(x, S(105), S(230), S(34));
-    }
-
-    private void LayoutStatusCard()
-    {
-        int w = _statusCard.Width;
-        int left = S(18);
-        bool running = _backend.Connected;
-
-        _hint.Visible = !running;
-        _hint.SetBounds(left, S(4), w - S(36), S(64));
-
-        foreach (var c in new Control[] { _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine })
-        {
-            c.Visible = running;
-        }
-
-        if (!running) return;
-
-        int columnWidth = (w - left * 2) / 3;
-        // 垂直方向上下留白取接近对称，卡片不再显得内容压在上半截
-        _fpsValue.SetBounds(left, S(20), columnWidth, S(26));
-        _fpsCaption.SetBounds(left, S(46), columnWidth, S(16));
-        _kbpsValue.SetBounds(left + columnWidth, S(20), columnWidth, S(26));
-        _kbpsCaption.SetBounds(left + columnWidth, S(46), columnWidth, S(16));
-        _bufValue.SetBounds(left + columnWidth * 2, S(20), columnWidth, S(26));
-        _bufCaption.SetBounds(left + columnWidth * 2, S(46), columnWidth, S(16));
-
-        _level.SetBounds(left, S(72), w - left * 2, S(10));
-        _serverLine.SetBounds(left, S(90), w - left * 2, S(18));
     }
 
     private void LayoutLogCard()
@@ -788,23 +797,6 @@ public sealed class MainForm : Form
             _underrunHistory.Clear();
             _lastUnderrunRate = -1;
             _serverLine.Text = _backend.WantReceiving ? "后台正在重连…" : "";
-        }
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-
-        int pad = S(22);
-        var mark = new Rectangle(pad, S(16), S(38), S(38));
-
-        var art = LoadBrandMark(mark.Width);
-        if (art is not null)
-        {
-            g.DrawImage(art, mark);
         }
     }
 

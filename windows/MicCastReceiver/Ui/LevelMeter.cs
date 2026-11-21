@@ -12,6 +12,12 @@ public sealed class LevelMeter : Control
 
     public int BarHeight { get; set; } = 8;
 
+    /// <summary>
+    /// 放在 Hero 渐变底上时置 true：绿色渐变在蓝底上分辨不出来，
+    /// 改成半透明白轨道 + 纯白填充（和手机端一致）。
+    /// </summary>
+    public bool InHero { get; set; }
+
     public LevelMeter()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
@@ -49,23 +55,32 @@ public sealed class LevelMeter : Control
         float h = Math.Min(BarHeight, Height);
         float y = (Height - h) / 2f;
         var track = new RectangleF(0, y, Width, h);
-        Theme.FillRound(g, track, h / 2f, Theme.Track);
+        Theme.FillRound(g, track, h / 2f, InHero ? Theme.HeroTrack : Theme.Track);
 
         float width = Math.Max(0, _display) * Width;
         if (width > h)
         {
             var fill = new RectangleF(0, y, width, h);
             using var path = Theme.RoundRect(fill, h / 2f);
-            using var brush = new LinearGradientBrush(
-                new RectangleF(0, y, Math.Max(Width * 0.55f, width), h),
-                Theme.Ok, Theme.Accent, LinearGradientMode.Horizontal);
-            g.FillPath(brush, path);
+            if (InHero)
+            {
+                using var brush = new SolidBrush(Theme.OnHero);
+                g.FillPath(brush, path);
+            }
+            else
+            {
+                using var brush = new LinearGradientBrush(
+                    new RectangleF(0, y, Math.Max(Width * 0.55f, width), h),
+                    Theme.Ok, Theme.Accent, LinearGradientMode.Horizontal);
+                g.FillPath(brush, path);
+            }
         }
 
         if (_peak * Width > h)
         {
             float px = Math.Min(Width - 1.5f, _peak * Width);
-            using var pen = new Pen(Theme.Mix(Theme.Ok, Color.White, 0.35), Math.Max(1.5f, h / 4f));
+            Color peakColor = InHero ? Theme.OnHero : Theme.Mix(Theme.Ok, Color.White, 0.35);
+            using var pen = new Pen(peakColor, Math.Max(1.5f, h / 4f));
             g.DrawLine(pen, px, y, px, y + h);
         }
     }

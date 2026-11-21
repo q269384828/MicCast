@@ -17,7 +17,7 @@ public sealed class ModernButton : Control
     private bool _pressed;
 
     public ButtonKind Kind { get; set; } = ButtonKind.Primary;
-    public int CornerRadius { get; set; } = 10;
+    public int CornerRadius { get; set; } = Theme.RadiusControl;
     public int LogicalPadding { get; set; } = 18;
 
     public ModernButton()

@@ -5,7 +5,7 @@ namespace MicCastReceiver.Ui;
 /// <summary>圆角卡片背景。子控件请放在圆角以内，避免方角溢出。</summary>
 public sealed class Card : Panel
 {
-    public int CornerRadius { get; set; } = 14;
+    public int CornerRadius { get; set; } = Theme.RadiusCard;
     public bool ShowBorder { get; set; } = true;
     public Color? FillOverride { get; set; }
 
