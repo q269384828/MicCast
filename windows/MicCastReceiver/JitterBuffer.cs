@@ -20,7 +20,7 @@ public sealed class JitterBuffer : IWaveProvider
     private readonly int _blockAlign;
     private readonly double _framesPerMs;
     private readonly int _capacityFrames;
-    private readonly int _minTargetMs;
+    private int _minTargetMs;
     private readonly int _maxTargetMs;
 
     /// <summary>最大速率偏移。6% 时音调变化不到一个半音，语音听不出来。</summary>
@@ -50,6 +50,7 @@ public sealed class JitterBuffer : IWaveProvider
     private int _targetDropCooldown;
     private long _underrunAvailableSum;
     private int _underrunSamples;
+    private bool _targetCalibrated;
 
     /// <summary>诊断：一次 Read 请求的最大帧数，即 WasapiOut 的批量拉取粒度。</summary>
     public int MaxReadFrames { get; private set; }
@@ -246,6 +247,21 @@ public sealed class JitterBuffer : IWaveProvider
             if (outFrames <= 0) return count;
 
             if (outFrames > MaxReadFrames) MaxReadFrames = outFrames;
+
+            if (!_targetCalibrated)
+            {
+                // 水位下限必须覆盖 WasapiOut 连续两次完整拉取：
+                // 它起播时要连着读几次把 render buffer 填满（实测 418 帧/次 ≈ 26ms），
+                // 水位只够一次的话，第二次就直接见底 —— 这是「缓冲看着有 50ms
+                // 却每隔一秒欠载一次」的真正原因，跟网络抖动无关。
+                _targetCalibrated = true;
+                int needed = (int)Math.Ceiling(outFrames * 2 / (double)_framesPerMs) + 10;
+                if (needed > _minTargetMs && needed <= _maxTargetMs)
+                {
+                    _minTargetMs = needed;
+                    if (_targetMs < _minTargetMs) _targetMs = _minTargetMs;
+                }
+            }
 
             _rate = _frameCount < 20 ? 1.0 : ComputeRate();
             _rateSum += _rate;

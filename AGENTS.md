@@ -200,6 +200,39 @@ $writer.WriteLine('{"cmd":"gain","gainDb":6}')
 
 另外 target 回落速度要慢（每 5 个包降 1ms ≈ 40ms/s），降太快会一头扎回欠载区。
 
+## 8e. 水位下限必须按 WasapiOut 的拉取粒度算，不能拍脑袋
+
+**这是 3.7ms/s 地板的真凶**，也是本项目最容易误判成"网络抖动"的问题。
+
+`--status` 里的诊断字段（`readFrames` / `availAtUnderrun`）一出来就清楚了：
+
+```
+readFrames=418          # WasapiOut 单次 Read 要 418 帧 = 26ms
+availAtUnderrun=0       # 欠载时缓冲里真的是 0，不是"差一点点"
+buf=56ms target=62ms    # 看着有 56ms，还在欠载
+```
+
+**`WasapiOut` 起播时要连着读几次把 render buffer 填满**，
+所以水位必须覆盖**两次完整拉取**（2×26 = 52ms）。而 `balanced` 的 target 在 42~65 之间晃，
+正好卡在边界上，隔一秒就撞一次 —— 表现为稳定的 3.7~4.2 ms/s。
+
+修法：第一次 `Read` 时按实测 `outFrames` 校准水位下限
+
+```csharp
+int needed = (int)Math.Ceiling(outFrames * 2 / (double)_framesPerMs) + 10;
+if (needed > _minTargetMs && needed <= _maxTargetMs) { _minTargetMs = needed; ... }
+```
+
+本机算出 63ms，欠载从 4.24 降到 **0.10 ms/s**。
+
+**三条印证这个解释的证据：**
+- `low` 档（buf 36ms < 52ms）差到 **37 ms/s**
+- `balanced`（51ms）和 `stable`（93ms）都卡在 **3.7 左右** —— 前者刚好在边界，后者
+  的 `wasapiLatency=40` 让 `readFrames` 更大，2× 后同样在边界
+- `availAtUnderrun=0` 说明不是"水位差几毫秒"，是真空了
+
+**教训：欠载排查必须先看"单次要多少"再看"手上剩多少"，光看 buf vs target 会得出错误结论。**
+
 **判断欠载健康度看速率不看总量**：`underrunMs` 是累计值只增不减，
 刚启动那几十秒的欠载会永远留在计数里。换算成 `ms/s`（5 秒滑动窗口）才有意义，
 稳态应该 < 2 —— 界面上显示的也是这个。
