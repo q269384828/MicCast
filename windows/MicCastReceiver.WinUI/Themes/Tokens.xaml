@@ -39,6 +39,16 @@
             <SolidColorBrush x:Key="OnHeroSoftBrush" Color="#DCFFFFFF" />
             <SolidColorBrush x:Key="HeroTrackBrush" Color="#4DFFFFFF" />
             <SolidColorBrush x:Key="HeroPillBgBrush" Color="#33FFFFFF" />
+
+            <!-- 覆盖 WinUI 原生控件用到的强调色，让 Slider / ComboBox / TextBox
+                 跟随我们的 accent，而不是用户的系统强调色（可能是橄榄绿/橙色） -->
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#2F6BFF" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#1F5BF0" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#1A4FD0" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#2F6BFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#2F6BFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#8A9BAB" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Dark">
@@ -71,6 +81,16 @@
             <SolidColorBrush x:Key="OnHeroSoftBrush" Color="#D9FFFFFF" />
             <SolidColorBrush x:Key="HeroTrackBrush" Color="#3DFFFFFF" />
             <SolidColorBrush x:Key="HeroPillBgBrush" Color="#33FFFFFF" />
+
+            <!-- 覆盖 WinUI 原生控件用到的强调色，让 Slider / ComboBox / TextBox
+                 跟随我们的 accent，而不是用户的系统强调色（可能是橄榄绿/橙色） -->
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="#4F8CFF" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#6E9DFF" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#3D7AEE" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="#16203A" />
+            <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="#4F8CFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#4F8CFF" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#64748B" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="HighContrast">
@@ -103,9 +123,27 @@
             <SolidColorBrush x:Key="OnHeroSoftBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
             <SolidColorBrush x:Key="HeroTrackBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
             <SolidColorBrush x:Key="HeroPillBgBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+
+            <SolidColorBrush x:Key="SliderTrackValueFill" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SliderThumbBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="{ThemeResource SystemColorWindowTextColor}" />
         </ResourceDictionary>
 
     </ResourceDictionary.ThemeDictionaries>
+
+    <!--
+        覆盖 WinUI 原生控件用到的系统资源键。
+        不覆盖的话，Slider / ComboBox / TextBox 的强调色会跟随系统
+        （用户系统强调色可能是橄榄绿、橙色…），和我们的 design-system 对不上。
+
+        这些是 Fluent 的「lightweight styling」键，改它们不需要重写控件模板。
+    -->
+
+
 
     <!-- ===== 圆角 ===== -->
     <CornerRadius x:Key="RadiusHero">22</CornerRadius>
