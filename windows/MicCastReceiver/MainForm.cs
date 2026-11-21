@@ -45,6 +45,9 @@ public sealed class MainForm : Form
     private readonly Label _serverLine = new();
 
     private readonly ModernButton _startButton = new();
+    private readonly ModernButton _muteButton = new();
+    private readonly Label _gainLabel = new();
+    private readonly TrackBar _gainSlider = new();
 
     private readonly Card _logCard = new();
     private readonly Label _logTitle = new();
@@ -231,6 +234,30 @@ public sealed class MainForm : Form
         _startButton.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
         _startButton.Click += async (_, _) => await ToggleAsync();
 
+        _muteButton.Text = "静音";
+        _muteButton.Kind = ButtonKind.Subtle;
+        _muteButton.Font = new Font("Microsoft YaHei UI", 9.5f);
+        _muteButton.Click += (_, _) => ToggleMute();
+
+        _gainLabel.Text = "增益 0 dB";
+        _gainLabel.Font = new Font("Microsoft YaHei UI", 9f);
+        _gainLabel.TextAlign = ContentAlignment.MiddleLeft;
+
+        // 增益只在前端做一次乘法，改动立刻作用于后续帧，不需要重连。
+        _gainSlider.Minimum = -12;
+        _gainSlider.Maximum = 12;
+        _gainSlider.TickFrequency = 3;
+        _gainSlider.SmallChange = 1;
+        _gainSlider.LargeChange = 3;
+        _gainSlider.Value = 0;
+        _gainSlider.TickStyle = TickStyle.None;
+        _gainSlider.ValueChanged += (_, _) =>
+        {
+            double db = _gainSlider.Value;
+            _backend.GainDb = db;
+            _gainLabel.Text = db == 0 ? "增益 0 dB" : $"增益 {(db > 0 ? "+" : "")}{db:0} dB";
+        };
+
         _logTitle.Text = "日志";
         _logTitle.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
         _clearLogButton.Text = "清空";
@@ -250,7 +277,7 @@ public sealed class MainForm : Form
         _statusCard.Controls.AddRange(new Control[] { _hint, _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine });
         _logCard.Controls.AddRange(new Control[] { _logTitle, _clearLogButton, _logBox });
 
-        Controls.AddRange(new Control[] { _title, _subtitle, _pill, _banner, _deviceCard, _statusCard, _startButton, _logCard });
+        Controls.AddRange(new Control[] { _title, _subtitle, _pill, _banner, _deviceCard, _statusCard, _startButton, _muteButton, _gainLabel, _gainSlider, _logCard });
     }
 
     private void ApplyTheme()
@@ -322,7 +349,13 @@ public sealed class MainForm : Form
         LayoutStatusCard();
         y += statusHeight + S(14);
 
-        _startButton.SetBounds(pad, y, S(180), S(44));
+        _startButton.SetBounds(pad, y, S(150), S(44));
+        int mx = pad + S(150) + S(10);
+        _muteButton.SetBounds(mx, y, S(96), S(44));
+        mx += S(96) + S(16);
+        _gainLabel.SetBounds(mx, y + S(12), S(92), S(20));
+        mx += S(92) + S(8);
+        _gainSlider.SetBounds(mx, y, Math.Max(S(120), width - (mx - pad)), S(44));
         y += S(44) + S(14);
 
         int logHeight = Math.Max(S(120), ClientSize.Height - y - pad);
@@ -572,6 +605,58 @@ public sealed class MainForm : Form
         try { File.WriteAllText(LastIpFile, ip); } catch { }
     }
 
+    // ===== 静音 / 增益 =====
+
+    private const int HotKeyMuteId = 0x4D43;   // 随便一个进程内唯一 ID
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // 全局热键：窗口藏到托盘后依然有效，会议中不用切窗口
+        if (!RegisterHotKey(Handle, HotKeyMuteId, ModControl | ModAlt, (uint)Keys.M))
+        {
+            try
+            {
+                File.AppendAllText(
+                    Path.Combine(Path.GetTempPath(), "miccast-hotkey.log"),
+                    $"{DateTime.Now:HH:mm:ss} RegisterHotKey Ctrl+Alt+M 失败（可能被其他程序占用）{Environment.NewLine}");
+            }
+            catch { }
+        }
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        try { UnregisterHotKey(Handle, HotKeyMuteId); } catch { }
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WmHotKey = 0x0312;
+        if (m.Msg == WmHotKey && m.WParam.ToInt32() == HotKeyMuteId)
+        {
+            ToggleMute();
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    private void ToggleMute()
+    {
+        // 走 IBackend：如果是 PipeBackend，会发命令给宿主，宿主再改真正的播放器
+        _backend.Muted = !_backend.Muted;
+        UpdateState();
+    }
+
     private async Task ToggleAsync()
     {
         // 重连逻辑已经上移到 ReceiverHost，这里只表达用户意图
@@ -653,6 +738,17 @@ public sealed class MainForm : Form
         bool reconnecting = _backend.WantReceiving && !running;
         _startButton.Text = running ? "停止接收" : (reconnecting ? "取消重连" : "开始接收");
         _startButton.Kind = running ? ButtonKind.Danger : (reconnecting ? ButtonKind.Danger : ButtonKind.Primary);
+
+        bool muted = _backend.Muted;
+        _muteButton.Text = muted ? "取消静音" : "静音";
+        _muteButton.Kind = muted ? ButtonKind.Danger : ButtonKind.Subtle;
+
+        // 增益可能被托盘菜单或另一个前端改过，这里回填滑块（防重入）
+        int gainInt = (int)Math.Round(_backend.GainDb);
+        if (_gainSlider.Value != gainInt)
+        {
+            _gainSlider.Value = Math.Clamp(gainInt, _gainSlider.Minimum, _gainSlider.Maximum);
+        }
 
         if (running)
         {

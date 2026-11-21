@@ -31,6 +31,12 @@ public interface IBackend : IDisposable
     float Level { get; }
     LatencyProfile Profile { get; set; }
 
+    /// <summary>静音：仍写静音帧，不断流。</summary>
+    bool Muted { get; set; }
+
+    /// <summary>软件增益，单位 dB（-12 ~ +12），0 表示不处理。</summary>
+    double GainDb { get; set; }
+
     /// <summary>自动发现到的手机，由宿主统一维护，避免多进程重复监听 UDP 59200。</summary>
     List<Protocol.DiscoveredServer> Servers { get; }
 

@@ -107,9 +107,53 @@ public sealed class AudioPlayer : IDisposable
         lock (_gate)
         {
             if (_buffer is null) return;
-            _buffer.Write(pcm, tick);
-            Level = ComputeRms(pcm);
+            byte[] processed = ApplyProcessing(pcm);
+            _buffer.Write(processed, tick);
+            // 电平跟着实际送进声卡的数据走：静音时界面应该显示 0，
+            // 而不是继续显示麦克风原来的音量。
+            Level = ComputeRms(processed);
         }
+    }
+
+    private volatile bool _muted;
+    private volatile float _gainFactor = 1f;
+    private double _gainDb;
+
+    /// <summary>静音：仍然写入等长静音帧，保持 tick 连续，避免缓冲欠载。</summary>
+    public bool Muted
+    {
+        get => _muted;
+        set => _muted = value;
+    }
+
+    /// <summary>软件增益，单位 dB，范围建议 -12 ~ +12。0 表示原样输出。</summary>
+    public double GainDb
+    {
+        get => _gainDb;
+        set
+        {
+            _gainDb = value;
+            _gainFactor = (float)Math.Pow(10, value / 20.0);
+        }
+    }
+
+    private byte[] ApplyProcessing(byte[] pcm)
+    {
+        if (_muted) return new byte[pcm.Length];
+        if (Math.Abs(_gainDb) < 0.01) return pcm;
+
+        float factor = _gainFactor;
+        var outBuf = new byte[pcm.Length];
+        for (int i = 0; i + 1 < pcm.Length; i += 2)
+        {
+            short sample = (short)(pcm[i] | (pcm[i + 1] << 8));
+            int scaled = (int)(sample * factor);
+            if (scaled > short.MaxValue) scaled = short.MaxValue;
+            else if (scaled < short.MinValue) scaled = short.MinValue;
+            outBuf[i] = (byte)(scaled & 0xFF);
+            outBuf[i + 1] = (byte)((scaled >> 8) & 0xFF);
+        }
+        return outBuf;
     }
 
     public int BufferedMilliseconds => (int)(_buffer?.BufferedMilliseconds ?? 0);

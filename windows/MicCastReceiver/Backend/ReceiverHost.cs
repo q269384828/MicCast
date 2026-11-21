@@ -75,6 +75,8 @@ public sealed class ReceiverHost : IBackend
         DroppedMs = _receiver.DroppedMs,
         AveragePlaybackRate = _receiver.AveragePlaybackRate,
         Level = _receiver.Level,
+        Muted = _receiver.Muted,
+        GainDb = _receiver.GainDb,
         Profile = _profile.ToString().ToLowerInvariant(),
         Servers = _discovery.Servers.Select(s => new ServerDto
         {
@@ -113,6 +115,27 @@ public sealed class ReceiverHost : IBackend
         {
             _profile = value;
             _receiver.Profile = value;
+        }
+    }
+
+    public bool Muted
+    {
+        get => _receiver.Muted;
+        set
+        {
+            _receiver.Muted = value;
+            EmitLog(value ? "已静音" : "已取消静音");
+            PublishState();
+        }
+    }
+
+    public double GainDb
+    {
+        get => _receiver.GainDb;
+        set
+        {
+            _receiver.GainDb = value;
+            PublishState();
         }
     }
 

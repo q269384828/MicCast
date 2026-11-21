@@ -29,6 +29,8 @@ public sealed class StatusDto
     public double DroppedMs { get; set; }
     public double AveragePlaybackRate { get; set; }
     public float Level { get; set; }
+    public bool Muted { get; set; }
+    public double GainDb { get; set; }
     public string Profile { get; set; } = "balanced";
     public List<ServerDto> Servers { get; set; } = new();
     public List<DeviceDto> Devices { get; set; } = new();
@@ -56,6 +58,10 @@ public sealed class CommandDto
     public string Ip { get; set; } = string.Empty;
     public int Device { get; set; } = -1;
     public string Latency { get; set; } = string.Empty;
+    /// <summary>静音开关（cmd=mute 时有效）</summary>
+    public bool? Muted { get; set; }
+    /// <summary>增益 dB（cmd=gain 时有效）</summary>
+    public double? GainDb { get; set; }
 }
 
 internal static class BackendJson
@@ -249,6 +255,12 @@ public sealed class BackendServer : IDisposable
             case "stop":
                 await _host.StopAsync();
                 break;
+            case "mute":
+                if (cmd.Muted is bool muted) _host.Muted = muted;
+                break;
+            case "gain":
+                if (cmd.GainDb is double gainDb) _host.GainDb = Math.Clamp(gainDb, -24.0, 24.0);
+                break;
             case "shutdown":
                 _cts.Cancel();
                 break;
@@ -429,6 +441,18 @@ public sealed class PipeBackend : IBackend
     {
         get => _profile;
         set => _profile = value;
+    }
+
+    public bool Muted
+    {
+        get => S.Muted;
+        set => _ = SendAsync(new CommandDto { Cmd = "mute", Muted = value });
+    }
+
+    public double GainDb
+    {
+        get => S.GainDb;
+        set => _ = SendAsync(new CommandDto { Cmd = "gain", GainDb = value });
     }
 
     public List<Protocol.DiscoveredServer> Servers =>

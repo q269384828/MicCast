@@ -53,6 +53,20 @@ public sealed class Receiver : IDisposable
         get => _player.Profile;
         set => _player.Profile = value;
     }
+
+    /// <summary>静音：写入静音帧而不是停写，保持缓冲连续。</summary>
+    public bool Muted
+    {
+        get => _player.Muted;
+        set => _player.Muted = value;
+    }
+
+    /// <summary>软件增益（dB）。</summary>
+    public double GainDb
+    {
+        get => _player.GainDb;
+        set => _player.GainDb = value;
+    }
     public string LastError { get; private set; } = string.Empty;
     public event Action<string>? Log;
     public event Action? StateChanged;
