@@ -26,6 +26,9 @@ public sealed class MainForm : Form
     private readonly ModernButton _recheckButton = new();
 
     private readonly Card _deviceCard = new();
+    private readonly Label _serverIcon = new();
+    private readonly Label _deviceIcon = new();
+    private readonly Label _ipIcon = new();
     private readonly Label _serverCaption = new();
     private readonly Label _deviceCaption = new();
     private readonly Label _ipCaption = new();
@@ -190,6 +193,12 @@ public sealed class MainForm : Form
         _deviceCaption.Text = "输出设备";
         _ipCaption.Text = "或手动 IP";
 
+        // 图标用 Segoe Fluent Icons 字形，跟着系统走，不用维护图片资源。
+        // 这是 PowerToys 的 SettingsCard 同款做法：图标 + 标题 + 右侧控件。
+        SetSettingIcon(_serverIcon, "\uE717");   // Phone
+        SetSettingIcon(_deviceIcon, "\uE767");   // Volume
+        SetSettingIcon(_ipIcon, "\uE70F");       // Edit
+
         _serverBox.Placeholder = "正在扫描局域网…";
         _serverBox.SelectionChanged += (_, _) =>
         {
@@ -275,7 +284,7 @@ public sealed class MainForm : Form
 
         _hero.Controls.AddRange(new Control[] { _title, _subtitle, _pill, _hint, _fpsValue, _fpsCaption, _kbpsValue, _kbpsCaption, _bufValue, _bufCaption, _level, _serverLine });
         _banner.Controls.AddRange(new Control[] { _bannerTitle, _bannerText, _installButton, _openPageButton, _recheckButton });
-        _deviceCard.Controls.AddRange(new Control[] { _serverCaption, _serverBox, _deviceCaption, _deviceBox, _ipCaption, _ipBox, _refreshButton });
+        _deviceCard.Controls.AddRange(new Control[] { _serverIcon, _serverCaption, _serverBox, _deviceIcon, _deviceCaption, _deviceBox, _ipIcon, _ipCaption, _ipBox, _refreshButton });
         _logCard.Controls.AddRange(new Control[] { _logTitle, _clearLogButton, _logBox });
 
         Controls.AddRange(new Control[] { _hero, _banner, _deviceCard, _startButton, _gainLabel, _gainSlider, _logCard });
@@ -307,6 +316,11 @@ public sealed class MainForm : Form
         {
             label.BackColor = Theme.Surface;
             label.ForeColor = Theme.TextSecondary;
+        }
+        foreach (var icon in new[] { _serverIcon, _deviceIcon, _ipIcon })
+        {
+            icon.BackColor = Theme.Surface;
+            icon.ForeColor = Theme.TextSecondary;
         }
         _bannerTitle.BackColor = Theme.Surface;
         _bannerTitle.ForeColor = Theme.TextPrimary;
@@ -416,23 +430,41 @@ public sealed class MainForm : Form
         _recheckButton.SetBounds(x, buttonY, S(130), S(32));
     }
 
+    private static void SetSettingIcon(Label icon, string glyph)
+    {
+        icon.Text = glyph;
+        icon.Font = new Font("Segoe Fluent Icons", 12f);
+        icon.AutoSize = false;
+        icon.TextAlign = ContentAlignment.MiddleCenter;
+    }
+
     private void LayoutDeviceCard()
     {
         int w = _deviceCard.Width;
-        int labelWidth = S(66);
         int left = S(18);
+        int iconSize = S(16);
+        int labelWidth = S(82);
         int x = left + labelWidth;
+        int textX = left + iconSize + S(6);
+        int textWidth = labelWidth - iconSize - S(6);
 
-        _serverCaption.SetBounds(left, S(18), labelWidth, S(24));
+        // 图标 + 标题 + 右侧控件：PowerToys 的 SettingsCard 同款结构
+        _serverIcon.SetBounds(left, S(22), iconSize, S(16));
+        _serverCaption.SetBounds(textX, S(18), textWidth, S(24));
         _serverBox.SetBounds(x, S(12), w - x - S(18), S(38));
 
-        _deviceCaption.SetBounds(left, S(66), labelWidth, S(24));
+        _deviceIcon.SetBounds(left, S(70), iconSize, S(16));
+        _deviceCaption.SetBounds(textX, S(66), textWidth, S(24));
         int refreshWidth = S(64);
         _deviceBox.SetBounds(x, S(60), w - x - S(18) - refreshWidth - S(8), S(38));
         _refreshButton.SetBounds(w - S(18) - refreshWidth, S(60), refreshWidth, S(38));
 
-        _ipCaption.SetBounds(left, S(112), labelWidth + S(8), S(22));
+        _ipIcon.SetBounds(left, S(116), iconSize, S(16));
+        _ipCaption.SetBounds(textX, S(112), S(160), S(22));
         _ipBox.SetBounds(x, S(105), S(230), S(34));
+        // SetBounds 后显式同步内层输入框：只靠 OnLayout 不可靠
+        _ipBox.SyncInnerLayout();
+
     }
 
     private void LayoutLogCard()

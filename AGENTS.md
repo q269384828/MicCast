@@ -295,6 +295,31 @@ if (needed > _minTargetMs && needed <= _maxTargetMs) { _minTargetMs = needed; ..
 刚启动那几十秒的欠载会永远留在计数里。换算成 `ms/s`（5 秒滑动窗口）才有意义，
 稳态应该 < 2 —— 界面上显示的也是这个。
 
+## 8f. WinForms 自绘容器 + 常驻子控件是雷区
+
+给「手动 IP」做一个圆角输入框，试了 **8 种方案全部失败**：
+
+| 方案 | 结果 |
+|---|---|
+| `Control` + `UserPaint` + 子 TextBox | 子控件底块在、光标在、`Text` 有值，**文字不可见** |
+| `Panel` + `BackColor = Transparent` | 同上 |
+| `Panel` + 不透明底 + `Region` 裁圆角 | 同上 |
+| `SetBounds` / `Dock.Fill` + `Padding` | 同上（诊断打印出 `inner=309x25@(18,13)` 属性全对，就是渲染不对）|
+| `OnResize` / `OnLayout` 触发同步 | 同上 |
+| `BringToFront()` | 同上 |
+| `AutoSize = false` | 同上 |
+| `UserControl` 基类 | 同上 |
+| **标准 `TextBox`（方角）** | **立刻正常** |
+
+**结论：WinForms 里凡是"自绘容器 + 常驻子控件"的组合都会踩这个渲染坑。**
+纯自绘控件（没有子控件）完全没事 —— `ModernButton` / `Slider` / `LevelMeter` / `Hero` / `StatusPill` 都工作良好。
+同目录的 `DropDown` 能用，也是因为它自己画文字，**没有常驻子控件**（弹出列表时才建独立窗口）。
+
+**规则：**
+- 需要**输入能力**的控件，直接用标准控件（`TextBox` / `ComboBox`），不要自绘包装
+- 需要**展示**的控件，可以放心自绘
+- 想同时要「圆角 + 输入」，Round 1 的解法是把标准控件放进**卡片**（圆角由卡片承载），而不是给控件本身套自绘外壳
+
 ## 9. 构建缓存不要入库
 
 - 根目录和 `harmony/` 下的 `.hvigor/` 都是构建缓存，必须 gitignore
