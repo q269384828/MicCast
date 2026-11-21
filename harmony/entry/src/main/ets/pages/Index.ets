@@ -252,14 +252,14 @@ struct Index {
   build() {
     Column() {
       // ── 顶部渐变 Hero ─────────────────────────────────────
-      Column({ space: 12 }) {
-        Row({ space: 11 }) {
+      Column({ space: Tokens.cardGap }) {
+        Row({ space: Tokens.space2 }) {
           Image($r('app.media.brand_mark'))
-            .width(34)
-            .height(34)
+            .width(Tokens.iconSize)
+            .height(Tokens.iconSize)
             .objectFit(ImageFit.Contain)
 
-          Column({ space: 3 }) {
+          Column({ space: Tokens.space1 }) {
             Text('MicCast')
               .fontSize(Tokens.fontHero)
               .fontWeight(FontWeight.Bold)
@@ -275,7 +275,7 @@ struct Index {
           Text(this.statusText())
             .fontSize(Tokens.fontLabel)
             .fontColor($r('app.color.on_hero'))
-            .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+            .padding({ left: Tokens.space3, right: Tokens.space3, top: Tokens.space1, bottom: Tokens.space1 })
             .backgroundColor('#33FFFFFF')
             .borderRadius(Tokens.radiusPill)
         }
@@ -283,7 +283,7 @@ struct Index {
         .alignItems(VerticalAlign.Center)
 
         if (this.streaming) {
-          Column({ space: 6 }) {
+          Column({ space: Tokens.space2 }) {
             Row() {
               Text('麦克风输入')
                 .fontSize(Tokens.fontCaption)
@@ -298,25 +298,25 @@ struct Index {
             Stack({ alignContent: Alignment.Start }) {
               Column()
                 .width('100%')
-                .height(6)
+                .height(Tokens.levelBarHeight)
                 .borderRadius(3)
                 .backgroundColor($r('app.color.hero_track'))
               Column()
                 .width(`${this.levelPercent}%`)
-                .height(6)
+                .height(Tokens.levelBarHeight)
                 .borderRadius(3)
                 .backgroundColor($r('app.color.on_hero'))
                 .animation({ duration: 200, curve: Curve.EaseOut })
             }
             .width('100%')
-            .height(6)
+            .height(Tokens.levelBarHeight)
 
             Divider()
               .color('#33FFFFFF')
-              .margin({ top: 4 })
+              .margin({ top: Tokens.space1 })
 
             Row() {
-              Column({ space: 2 }) {
+              Column({ space: Tokens.space1 }) {
                 Text(this.uptime)
                   .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
@@ -328,7 +328,7 @@ struct Index {
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Start)
 
-              Column({ space: 2 }) {
+              Column({ space: Tokens.space1 }) {
                 Text(`${this.fpsRate}`)
                   .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
@@ -340,7 +340,7 @@ struct Index {
               .layoutWeight(1)
               .alignItems(HorizontalAlign.Center)
 
-              Column({ space: 2 }) {
+              Column({ space: Tokens.space1 }) {
                 Text(`${this.kbps}`)
                   .fontSize(Tokens.fontMetric)
                   .fontWeight(FontWeight.Bold)
@@ -359,18 +359,18 @@ struct Index {
         }
       }
       .width('100%')
-      .padding({ left: 18, right: 18, top: 16, bottom: 16 })
+      .padding({ left: Tokens.cardPadding, right: Tokens.cardPadding, top: Tokens.cardPadding, bottom: Tokens.cardPadding })
       .linearGradient({
         angle: 135,
         colors: [[$r('app.color.hero_from'), 0.0], [$r('app.color.hero_to'), 1.0]]
       })
       .borderRadius(Tokens.radiusHero)
-      .margin({ left: 16, right: 16, top: 12 })
+      .margin({ left: Tokens.pagePadding, right: Tokens.pagePadding, top: Tokens.cardGap })
 
       Scroll() {
-        Column({ space: 12 }) {
+        Column({ space: Tokens.cardGap }) {
           // ── 主操作 ──────────────────────────────────────
-          Column({ space: 14 }) {
+          Column({ space: Tokens.space4 }) {
             Text(this.hintText())
               .fontSize(Tokens.fontBody)
               .lineHeight(20)
@@ -418,7 +418,7 @@ struct Index {
               .margin({ top: 2 })
 
             // 采集模式：系统对不同 SourceType 套用不同的音频处理链，效果因机型而异
-            Column({ space: 8 }) {
+            Column({ space: Tokens.space2 }) {
               Row() {
                 Text('采集模式')
                   .fontSize(Tokens.fontTitle)
@@ -434,7 +434,7 @@ struct Index {
                 ForEach(MIC_MODES, (mode: MicMode) => {
                   Text(micModeLabel(mode))
                     .layoutWeight(1)
-                    .height(34)
+                    .height(Tokens.segmentedHeight)
                     .fontSize(Tokens.fontBody)
                     .textAlign(TextAlign.Center)
                     .fontColor(this.micMode === mode ? $r('app.color.on_accent') : $r('app.color.text_muted'))
@@ -461,14 +461,14 @@ struct Index {
             .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
-          .padding(16)
+          .padding(Tokens.cardPadding)
           .backgroundColor($r('app.color.card_bg'))
           .borderRadius(Tokens.radiusCard)
           .border({ width: 1, color: $r('app.color.divider') })
           .alignItems(HorizontalAlign.Start)
 
           // ── 电脑端指引 ──────────────────────────────────
-          Column({ space: 12 }) {
+          Column({ space: Tokens.cardGap }) {
             Row() {
               Text('电脑上怎么用')
                 .fontSize(Tokens.fontTitle)
@@ -487,14 +487,14 @@ struct Index {
             .width('100%')
 
             if (this.showGuide) {
-              Row({ space: 10 }) {
+              Row({ space: Tokens.space2 }) {
                 Text('1')
                   .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
-                  .width(20)
-                  .height(20)
+                  .width(Tokens.space5)
+                  .height(Tokens.space5)
                   .backgroundColor($r('app.color.tile_bg'))
                   .borderRadius(Tokens.radiusControl)
                 Text('运行电脑上的 MicCastReceiver.exe')
@@ -507,14 +507,14 @@ struct Index {
               .alignItems(VerticalAlign.Top)
               .transition(TransitionEffect.OPACITY)
 
-              Row({ space: 10 }) {
+              Row({ space: Tokens.space2 }) {
                 Text('2')
                   .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
-                  .width(20)
-                  .height(20)
+                  .width(Tokens.space5)
+                  .height(Tokens.space5)
                   .backgroundColor($r('app.color.tile_bg'))
                   .borderRadius(Tokens.radiusControl)
                 Text('设备列表里选中本机，点「开始接收」')
@@ -527,14 +527,14 @@ struct Index {
               .alignItems(VerticalAlign.Top)
               .transition(TransitionEffect.OPACITY)
 
-              Row({ space: 10 }) {
+              Row({ space: Tokens.space2 }) {
                 Text('3')
                   .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
-                  .width(20)
-                  .height(20)
+                  .width(Tokens.space5)
+                  .height(Tokens.space5)
                   .backgroundColor($r('app.color.tile_bg'))
                   .borderRadius(Tokens.radiusControl)
                 Text('输出设备选 CABLE Input')
@@ -547,14 +547,14 @@ struct Index {
               .alignItems(VerticalAlign.Top)
               .transition(TransitionEffect.OPACITY)
 
-              Row({ space: 10 }) {
+              Row({ space: Tokens.space2 }) {
                 Text('4')
                   .fontSize(Tokens.fontCaption)
                   .fontColor($r('app.color.accent'))
                   .textAlign(TextAlign.Center)
                   .lineHeight(20)
-                  .width(20)
-                  .height(20)
+                  .width(Tokens.space5)
+                  .height(Tokens.space5)
                   .backgroundColor($r('app.color.tile_bg'))
                   .borderRadius(Tokens.radiusControl)
                 Text('微信 / 腾讯会议 / Win+H 的麦克风选 CABLE Output')
@@ -569,14 +569,14 @@ struct Index {
             }
           }
           .width('100%')
-          .padding(16)
+          .padding(Tokens.cardPadding)
           .backgroundColor($r('app.color.card_bg'))
           .borderRadius(Tokens.radiusCard)
           .border({ width: 1, color: $r('app.color.divider') })
           .alignItems(HorizontalAlign.Start)
 
           // ── 运行日志 ────────────────────────────────────
-          Column({ space: 8 }) {
+          Column({ space: Tokens.space2 }) {
             Row() {
               Text('运行日志')
                 .fontSize(Tokens.fontLabel)
@@ -586,7 +586,7 @@ struct Index {
                 Text('清空')
                   .fontSize(Tokens.fontLabel)
                   .fontColor($r('app.color.accent'))
-                  .margin({ right: 14 })
+                  .margin({ right: Tokens.space3 })
                   .onClick(() => {
                     Logger.clear();
                     this.logs = [];
@@ -615,13 +615,13 @@ struct Index {
             }
           }
           .width('100%')
-          .padding(14)
+          .padding(Tokens.cardPadding)
           .backgroundColor($r('app.color.log_bg'))
           .borderRadius(Tokens.radiusCard)
           .alignItems(HorizontalAlign.Start)
         }
         .width('100%')
-        .padding({ left: 16, right: 16, top: 12, bottom: 28 })
+        .padding({ left: Tokens.cardPadding, right: Tokens.cardPadding, top: Tokens.cardGap, bottom: Tokens.space8 })
         .constraintSize({ minHeight: '100%' })
         .justifyContent(FlexAlign.Start)
       }
