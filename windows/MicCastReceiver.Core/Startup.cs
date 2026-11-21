@@ -45,7 +45,9 @@ public static class Startup
     {
         try
         {
-            string exe = Environment.ProcessPath ?? Application.ExecutablePath;
+            string exe = Environment.ProcessPath
+                ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
+                ?? string.Empty;
             string cmd = $"\"{exe}\" {AutoStartArgs}";
             using RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
             key.SetValue(AppName, cmd, RegistryValueKind.String);

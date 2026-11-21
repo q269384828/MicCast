@@ -19,8 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="System.Reactive" Version="7.0.0" />
+    <ProjectReference Include="..\MicCastReceiver.Core\MicCastReceiver.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

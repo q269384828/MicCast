@@ -1,0 +1,156 @@
+<!--
+    组件样式。所有颜色/圆角/间距都引用 Tokens.xaml，不写魔法数字。
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        通用按钮模板：hover / press 用半透明叠加层实现，
+        这样一个模板能适配主色、中性、危险三种底色，不用各写一份。
+    -->
+    <ControlTemplate x:Key="MicCastButtonTemplate" TargetType="Button">
+        <Grid
+            x:Name="Root"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="{TemplateBinding BorderThickness}"
+            CornerRadius="{TemplateBinding CornerRadius}">
+            <Grid
+                x:Name="HoverLayer"
+                Background="Transparent"
+                CornerRadius="{TemplateBinding CornerRadius}" />
+            <Grid
+                x:Name="PressLayer"
+                Background="Transparent"
+                CornerRadius="{TemplateBinding CornerRadius}" />
+            <ContentPresenter
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Content="{TemplateBinding Content}"
+                ContentTemplate="{TemplateBinding ContentTemplate}"
+                ContentTransitions="{TemplateBinding ContentTransitions}"
+                FontFamily="{TemplateBinding FontFamily}"
+                FontSize="{TemplateBinding FontSize}"
+                FontWeight="{TemplateBinding FontWeight}"
+                Foreground="{TemplateBinding Foreground}"
+                Padding="{TemplateBinding Padding}" />
+            <VisualStateManager.VisualStateGroups>
+                <VisualStateGroup x:Name="CommonStates">
+                    <VisualState x:Name="Normal" />
+                    <VisualState x:Name="PointerOver">
+                        <Storyboard>
+                            <ObjectAnimationUsingKeyFrames
+                                Storyboard.TargetName="HoverLayer"
+                                Storyboard.TargetProperty="Background">
+                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource HoverOverlayBrush}" />
+                            </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                    </VisualState>
+                    <VisualState x:Name="Pressed">
+                        <Storyboard>
+                            <ObjectAnimationUsingKeyFrames
+                                Storyboard.TargetName="PressLayer"
+                                Storyboard.TargetProperty="Background">
+                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource PressOverlayBrush}" />
+                            </ObjectAnimationUsingKeyFrames>
+                        </Storyboard>
+                    </VisualState>
+                    <VisualState x:Name="Disabled">
+                        <Storyboard>
+                            <DoubleAnimation
+                                Storyboard.TargetName="Root"
+                                Storyboard.TargetProperty="Opacity"
+                                To="0.5"
+                                Duration="0" />
+                        </Storyboard>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+        </Grid>
+    </ControlTemplate>
+
+    <!-- 主操作：主色填充 -->
+    <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+        <Setter Property="Template" Value="{StaticResource MicCastButtonTemplate}" />
+        <Setter Property="Height" Value="{StaticResource ButtonHeight}" />
+        <Setter Property="FontSize" Value="{StaticResource FontButton}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusControl}" />
+        <Setter Property="Background" Value="{ThemeResource AccentBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource OnAccentBrush}" />
+        <Setter Property="Padding" Value="18,0" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- 次要操作：描边中性（停止接收用这个，红色只留给破坏性操作） -->
+    <Style x:Key="OutlineButtonStyle" TargetType="Button">
+        <Setter Property="Template" Value="{StaticResource MicCastButtonTemplate}" />
+        <Setter Property="Height" Value="{StaticResource ButtonHeight}" />
+        <Setter Property="FontSize" Value="{StaticResource FontButton}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusControl}" />
+        <Setter Property="Background" Value="{ThemeResource SurfaceAltBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="18,0" />
+    </Style>
+
+    <!-- 轻量操作：无底，只有 hover 反馈 -->
+    <Style x:Key="GhostButtonStyle" TargetType="Button">
+        <Setter Property="Template" Value="{StaticResource MicCastButtonTemplate}" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="FontSize" Value="{StaticResource FontLabel}" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusControl}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{ThemeResource TextMutedBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="10,0" />
+    </Style>
+
+    <!-- 卡片：底 surface + 1px 描边 + 圆角 -->
+    <Style x:Key="CardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusCard}" />
+        <Setter Property="Padding" Value="{StaticResource CardPadding}" />
+    </Style>
+
+    <!-- 状态胶囊 -->
+    <Style x:Key="PillStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource PillIdleBgBrush}" />
+        <Setter Property="CornerRadius" Value="999" />
+        <Setter Property="Padding" Value="12,4" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 文字层级 -->
+    <Style x:Key="MetricTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{StaticResource FontMetric}" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{ThemeResource OnHeroBrush}" />
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <!-- 数字等宽：数值跳动时整行不会左右呼吸 -->
+    </Style>
+
+    <Style x:Key="MetricCaptionStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{StaticResource FontCaption}" />
+        <Setter Property="Foreground" Value="{ThemeResource OnHeroSoftBrush}" />
+    </Style>
+
+    <Style x:Key="SettingLabelStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{StaticResource FontLabel}" />
+        <Setter Property="Foreground" Value="{ThemeResource TextMutedBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SettingIconStyle" TargetType="FontIcon">
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="Foreground" Value="{ThemeResource TextMutedBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+</ResourceDictionary>
