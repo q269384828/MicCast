@@ -4,20 +4,49 @@
 
 ---
 
-## 1. 工程结构：两个平台完全独立
+## 1. 工程结构：三部分
 
 ```
 MicCast/
-├── harmony/     ← HarmonyOS 工程（DevEco Studio 打开这个目录，不是仓库根）
-├── windows/     ← WinForms 接收端（VS / dotnet 打开这个目录）
-├── tools/       ← 跨平台脚本
+├── harmony/                    ← HarmonyOS 工程（DevEco Studio 打开这个目录）
+├── windows/
+│   ├── MicCastReceiver.Core/   ← 纯逻辑（NAudio + Rx），WinForms 与 WinUI 共用
+│   ├── MicCastReceiver/        ← WinForms 版（保留，可回退）
+│   └── MicCastReceiver.WinUI/  ← WinUI 3 版（主力）
+├── tools/                      ← 跨平台脚本
 └── docs/
 ```
 
 - **禁止**把 HarmonyOS 的文件放回仓库根目录
-- 构建命令各自在子目录执行：
+- **Core 里不许出现 WinForms / WinUI API**（原来 `Startup.cs` 用了 `Application.ExecutablePath`，
+  已换成 `Environment.ProcessPath`）。判断方法：`grep -r "System.Windows.Forms\|Microsoft.UI" windows/MicCastReceiver.Core`
+- 构建命令：
   - HarmonyOS：`cd harmony && ./hvigorw assembleHap`
-  - Windows：`cd windows/MicCastReceiver && dotnet build -c Release`
+  - WinForms：`cd windows/MicCastReceiver && dotnet build -c Release`
+  - **WinUI：必须用 VS 的 MSBuild**（见第 2b 节），`dotnet build` 会报 MSB4062
+
+## 1b. WinUI 3 的几个硬坑
+
+| 坑 | 现象 | 修法 |
+|---|---|---|
+| `dotnet build` | `MSB4062 未能加载 Microsoft.Build.Packaging.Pri.Tasks.dll` | 用 `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe` |
+| `AppWindow.Resize` | 窗口变大了但内容仍按旧尺寸排版，右侧一片空白 | 用 Win32 `SetWindowPos`（走正常 WM_SIZE 路径） |
+| `GetDpiForWindow` | 窗口渲染前返回 96，150% 缩放屏上 900 被当成物理像素 | 尺寸要在 `RootGrid.Loaded` 里算 |
+| `MaxWidth` + `HorizontalAlignment="Center"` | 按「内容自然宽度」测量，卡片反而被缩窄 | 外面套一层撑满的 `Grid`，内层再 MaxWidth + Center |
+| 资源查找 | `RootGrid.Resources[key]` 抛 KeyNotFoundException，崩在 XAML 层（`0xc000027b`） | 样式在 `Application.Resources`，先查根再退回 `Application.Current.Resources` |
+| csproj XML 注释 | 写 `--status` 这种词会报 `MSB4025 注释中不能包含 --` | 注释里把参数名写成 `status` |
+| `Windows.Win32` PInvoke | 需要 CsWin32 源生成器，多一层依赖 | 用纯 `[DllImport]` |
+| `AllocConsole` | 输出被重定向时把管道句柄弄乱，命令挂住不返回 | 用 `AttachConsole(ATTACH_PARENT_PROCESS)` |
+
+**托盘必须照 PowerToys 的 `TrayIconService` 做**，不要自建消息窗口：
+
+1. 建**专用且永不激活**的 WinUI `Window` 只为拿 HWND（主窗口关掉重开不影响托盘）
+2. `SetWindowLongPtr(hwnd, GWLP_WNDPROC, proc)` 子类化它的 WndProc
+3. **委托必须存字段**（PowerToys 原文：否则 `WndProc will explode`）
+4. `RegisterWindowMessage("TaskbarCreated")` 处理 explorer 重启
+5. NIM_ADD 开机自启时可能因 explorer 未就绪失败 ——
+   用 `WM_WINDOWPOSCHANGING` 做重试钩子（那时收不到 TaskbarCreated）
+6. WndProc 末尾必须 `CallWindowProc(原proc, ...)` 链回去
 
 ## 2. 构建 HarmonyOS HAP：签名必须手动带上
 
@@ -295,9 +324,7 @@ if (needed > _minTargetMs && needed <= _maxTargetMs) { _minTargetMs = needed; ..
 刚启动那几十秒的欠载会永远留在计数里。换算成 `ms/s`（5 秒滑动窗口）才有意义，
 稳态应该 < 2 —— 界面上显示的也是这个。
 
-## 8f. WinForms 自绘容器 + 常驻子控件是雷区
-
-给「手动 IP」做一个圆角输入框，试了 **8 种方案全部失败**：
+## 8f. WinForms 自绘容器 + 常驻子控件是雷区给「手动 IP」做一个圆角输入框，试了 **8 种方案全部失败**：
 
 | 方案 | 结果 |
 |---|---|

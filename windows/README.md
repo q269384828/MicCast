@@ -191,11 +191,50 @@ MicCastReceiver.exe --ip <ip> --loopback-verify 3000 --log D:\arx.log   # 自检
 
 ## 构建
 
+工程分三部分，都能独立编译：
+
+```
+windows/
+├── MicCastReceiver.Core/    纯逻辑（NAudio + Rx），两端共用
+├── MicCastReceiver/         WinForms 版
+└── MicCastReceiver.WinUI/   WinUI 3 版（推荐）
+```
+
+### WinUI 3 版
+
+```powershell
+# 必须用 VS 的 MSBuild —— dotnet build 缺 PRI 生成任务会报 MSB4062
+$msbuild = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe'
+cd windows\MicCastReceiver.WinUI
+& $msbuild MicCastReceiver.WinUI.csproj /t:Restore /p:Platform=x64
+& $msbuild MicCastReceiver.WinUI.csproj /p:Configuration=Release /p:Platform=x64
+# 产物：bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\MicCastReceiver.exe
+```
+
+需要 Visual Studio 2022（UWP 工作负载，提供 `Microsoft.Build.Packaging.Pri.Tasks.dll`）。
+
+配置用 PowerToys Settings 同款：`WindowsPackageType=None` + `WindowsAppSDKSelfContained=true`
+——不需要 MSIX 打包、不需要用户预装 Windows App SDK。
+
+### WinForms 版（保留，可回退）
+
 ```powershell
 cd windows\MicCastReceiver
 dotnet publish -c Release -r win-x64 --self-contained false
 # 产物：bin\Release\net9.0-windows\win-x64\publish\MicCastReceiver.exe（约 0.73 MB，需 .NET 9 运行时）
 ```
+
+### 两版对比
+
+| | WinUI 3 | WinForms |
+|---|---|---|
+| 冷启动 | 270~820 ms | 890~1660 ms |
+| 内存 | 114 MB | 63 MB |
+| 分发体积 | 95.7 MB / 306 文件 | 2.3 MB / 2 文件 |
+| 输入控件 | 原生圆角/焦点环/占位符 | 自绘容器套子控件会踩渲染坑（见 AGENTS.md 8f）|
+
+体积差 40 倍是 WinUI 的硬代价（自包含 Runtime）。换来的是原生 Fluent 控件、
+自绘标题栏、以及不再需要手写控件模板。
 
 ## 协议实现要点
 
