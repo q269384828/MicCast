@@ -315,6 +315,9 @@ public sealed class MainForm : Form
         _deviceBox.BackColor = Theme.Surface;
         _ipBox.ApplyTheme();
 
+        // 增益标签在窗口背景上，不是卡片内 —— 漏设会掉回 Label 的默认黑字
+        _gainLabel.ForeColor = Theme.TextPrimary;
+
         _logBox.BackColor = Theme.LogBg;
         _logBox.ForeColor = Theme.LogText;
 
