@@ -2,7 +2,8 @@
     x:Class="MicCastReceiver.WinUI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:MicCastReceiver.WinUI">
+    xmlns:local="using:MicCastReceiver.WinUI"
+    xmlns:controls="using:MicCastReceiver.WinUI.Controls">
 
     <Grid x:Name="RootGrid" Background="{ThemeResource BgBrush}">
         <Grid.RowDefinitions>
@@ -88,7 +89,7 @@
                                     Foreground="{ThemeResource OnHeroSoftBrush}" />
                             </StackPanel>
 
-                            <Border
+                            <ContentControl
                                 Grid.Column="2"
                                 Style="{StaticResource PillStyle}"
                                 Background="{ThemeResource HeroPillBgBrush}">
@@ -104,9 +105,10 @@
                                         Text="未启动"
                                         FontSize="{StaticResource FontLabel}"
                                         FontWeight="SemiBold"
-                                        Foreground="{ThemeResource OnHeroBrush}" />
+                                        Foreground="{ThemeResource OnHeroBrush}"
+                                        VerticalAlignment="Center" />
                                 </StackPanel>
-                            </Border>
+                            </ContentControl>
                         </Grid>
 
                         <!-- 未连接时的提示 -->
@@ -253,60 +255,51 @@
                         ValueChanged="OnGainChanged" />
                 </Grid>
 
-                <!-- ===== 设备设置（图标 + 标题 + 右侧控件）===== -->
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel Spacing="14">
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE717;" Style="{StaticResource SettingIconStyle}" />
-                            <TextBlock Grid.Column="1" Text="手机" Style="{StaticResource SettingLabelStyle}"
-                                       Width="{StaticResource SettingLabelWidth}" Margin="8,0,0,0" />
-                            <ComboBox x:Name="ServerBox" Grid.Column="2" HorizontalAlignment="Stretch"
+                <!--
+                    屏幕上的设置项按「语义」分组，不是按视觉平铺：
+                    「自动发现」和「或手动 IP」都是回答「连哪台手机」→ 同一组；
+                    「播放到」是另一件事 → 单独一组。
+                -->
+                <controls:SettingGroup Header="手机">
+                    <StackPanel Spacing="12">
+                        <controls:SettingRow Glyph="&#xE717;" Label="自动发现">
+                            <ComboBox x:Name="ServerBox"
+                                      HorizontalAlignment="Stretch"
                                       Height="{StaticResource ControlHeight}"
                                       PlaceholderText="正在扫描局域网…"
                                       SelectionChanged="OnServerSelected" />
-                        </Grid>
+                        </controls:SettingRow>
 
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE767;" Style="{StaticResource SettingIconStyle}" />
-                            <TextBlock Grid.Column="1" Text="输出设备" Style="{StaticResource SettingLabelStyle}"
-                                       Width="{StaticResource SettingLabelWidth}" Margin="8,0,0,0" />
-                            <ComboBox x:Name="DeviceBox" Grid.Column="2" HorizontalAlignment="Stretch"
-                                      Height="{StaticResource ControlHeight}"
-                                      SelectionChanged="OnDeviceSelected" />
-                            <Button Grid.Column="3" Content="刷新" Style="{StaticResource OutlineButtonStyle}"
-                                    Height="{StaticResource ControlHeight}" FontSize="{StaticResource FontLabel}"
-                                    Margin="8,0,0,0" Click="OnRefreshDevices" />
-                        </Grid>
-
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE70F;" Style="{StaticResource SettingIconStyle}" />
-                            <TextBlock Grid.Column="1" Text="或手动 IP" Style="{StaticResource SettingLabelStyle}"
-                                       Width="{StaticResource SettingLabelWidth}" Margin="8,0,0,0" />
-                            <TextBox x:Name="IpBox" Grid.Column="2" Width="230"
+                        <controls:SettingRow Glyph="&#xE70F;" Label="或手动 IP">
+                            <TextBox x:Name="IpBox"
+                                     HorizontalAlignment="Left"
+                                     Width="230"
                                      Height="{StaticResource ControlHeight}"
                                      PlaceholderText="192.168.x.x"
                                      VerticalContentAlignment="Center" />
-                        </Grid>
-
+                        </controls:SettingRow>
                     </StackPanel>
-                </Border>
+                </controls:SettingGroup>
+
+                <controls:SettingGroup Header="输出设备">
+                    <controls:SettingRow Glyph="&#xE767;" Label="播放到">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="DeviceBox"
+                                      HorizontalAlignment="Stretch"
+                                      Height="{StaticResource ControlHeight}"
+                                      SelectionChanged="OnDeviceSelected" />
+                            <Button Grid.Column="1" Content="刷新"
+                                    Style="{StaticResource OutlineButtonStyle}"
+                                    Height="{StaticResource ControlHeight}"
+                                    FontSize="{StaticResource FontLabel}"
+                                    Click="OnRefreshDevices" />
+                        </Grid>
+                    </controls:SettingRow>
+                </controls:SettingGroup>
 
                 <!-- ===== 日志 ===== -->
                 <Border Style="{StaticResource CardStyle}" Background="{ThemeResource SurfaceBrush}">

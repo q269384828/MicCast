@@ -38,6 +38,8 @@ MicCast/
 | `Windows.Win32` PInvoke | 需要 CsWin32 源生成器，多一层依赖 | 用纯 `[DllImport]` |
 | `Border.CornerRadius="999"` | 画成**纺锤形/杏仁形**（四段圆弧重叠），不是圆角胶囊 | WinUI 不钳制半径。固定高度 + 半径取半高（26 高 → 13）。WinForms 的 `AddArc` 会自动收敛，从 WinForms 照搬 999 必错 |
 | Rx 日志/状态订阅 | 后台线程直接改 XAML 控件抛跨线程异常，表现为**日志区一直空着** | `.ObserveOn(new DispatcherQueueSynchronizationContext(DispatcherQueue))` |
+| 容器内文字偏上 | 只设外层 `Padding` 不够，子元素撑满高度后顶部对齐 | 垂直居中要在**模板**里用 `ContentPresenter VerticalAlignment=Center` 保证 |
+| 设置项每行手写布局 | 复制粘贴导致图标/文字/间距每次差一点，相关项看不出是一组 | 用 `Controls/SettingRow` + `SettingGroup`，布局与分组在模板里定义；分组判据见 `docs/design-system.md` 第 9 节 |
 | `AllocConsole` | 输出被重定向时把管道句柄弄乱，命令挂住不返回 | 用 `AttachConsole(ATTACH_PARENT_PROCESS)` |
 
 **托盘必须照 PowerToys 的 `TrayIconService` 做**，不要自建消息窗口：

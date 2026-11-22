@@ -196,10 +196,46 @@
 - 内边距 `card-padding`
 - 不用阴影（深浅色下阴影都不稳定）
 
+### 设置项：SettingRow / SettingGroup（两端通用概念）
+
+**问题**：早期每个设置行都是手写一遍 `Grid` + `ColumnDefinitions` + `Margin`，
+每个容器都自己写 `VerticalAlignment`。结果是同一类问题反复出现 ——
+图标没对齐、文字偏上、相关项看不出是一组。
+
+**抽象成两个原语，使用点只声明语义：**
+
+| 原语 | 职责 | 使用点只写 |
+|---|---|---|
+| `SettingRow` | 图标 + 标题 + 右侧控件。**列宽与垂直居中由模板保证** | `Glyph`、`Label`、`Content` |
+| `SettingGroup` | 卡片 + 分组标题，把语义相关的行框在一起 | `Header` + 若干 `SettingRow` |
+
+**分组的判据是「是否回答同一个问题」，不是视觉整齐：**
+
+```
+手机                    ← 一组：都在回答「连哪台手机」
+├── 自动发现  [下拉]
+└── 或手动 IP [输入]
+
+输出设备                ← 另一组：回答「播到哪」
+└── 播放到    [下拉] [刷新]
+```
+
+新增设置项时，先问「它和已有哪一项回答同一个问题」——
+是就放进同一组，不是就新建一组。**不要**为了「三行看着整齐」把无关项平铺在一起。
+
+Windows 实现：`Controls/SettingRow.cs`、`Controls/SettingGroup.cs`，
+模板在 `Themes/Styles.xaml`（隐式样式，按类型自动应用）。
+手机端照此结构用 `Column` + 卡片分组，语义一致。
+
 ### 状态胶囊
+
 - 高 **26**，圆角 **13**（= 高度一半），文字 `font-label`，内边距横向 `space-3`
-- **不要写 `CornerRadius="999"`**：WinUI 的 `Border` 不钳制半径，四段圆弧会重叠成
-  纺锤形；WinForms 的 `AddArc` 会自动收敛，所以从 WinForms 照搬 999 会画错
+- **两条都要在模板里保证，不能靠使用点自觉**：
+  1. **不要写 `CornerRadius="999"`** —— WinUI 的 `Border` 不钳制半径，四段圆弧会
+     重叠成纺锤形。WinForms 的 `AddArc` 会自动收敛，从 WinForms 照搬 999 会画错。
+  2. **内容必须垂直居中** —— 只设外层 `Padding` 不够，子元素会撑满高度后顶部对齐
+     （「接收中」看起来偏上就是这个原因）。模板里 `ContentPresenter` 要加
+     `VerticalAlignment="Center"`。
 - Hero 内版本用半透明白底（`#33FFFFFF`）+ `on-hero` 文字
 
 ### 主按钮
