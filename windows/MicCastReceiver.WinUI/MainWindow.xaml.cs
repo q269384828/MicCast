@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using System.Runtime.InteropServices;
 using System.Reactive.Linq;
 using Windows.UI;
 
@@ -35,6 +36,7 @@ public sealed partial class MainWindow : Window
     public MainWindow(StartOptions options)
     {
         _options = options;
+        _sizeWndProc = SizeWndProc;
 
         var (backend, host) = CreateBackend();
         _backend = backend;
@@ -139,6 +141,8 @@ public sealed partial class MainWindow : Window
         try
         {
             IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            // 先装尺寸约束，再设初始尺寸 —— 否则这次 Resize 会绕过限制
+            ApplySizeConstraints();
             uint dpi = GetDpiForWindow(hwnd);
             double scale = dpi == 0 ? 1.0 : dpi / 96.0;
 
@@ -160,6 +164,87 @@ public sealed partial class MainWindow : Window
         {
             App.Log($"ApplyWindowSize FAILED {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    // ===== 窗口尺寸上下限 =====
+
+    private const int WM_GETMINMAXINFO = 0x0024;
+    private const int GWLP_WNDPROC = -4;
+
+    /// <summary>逻辑尺寸上限：内容 MaxWidth 860 + 左右 page padding 40 + 滚动条 ≈ 940，取 960 留余量。</summary>
+    private const int MaxLogicalWidth = 960;
+    private const int MaxLogicalHeight = 1000;
+    private const int MinLogicalWidth = 720;
+    private const int MinLogicalHeight = 560;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+
+    private delegate IntPtr WndProcDelegate(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
+    private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    // LOAD BEARING: 必须存字段，委托被 GC 后 WndProc 会崩（同托盘那套）
+    private readonly WndProcDelegate _sizeWndProc;
+    private IntPtr _originalWndProc;
+    private IntPtr _windowHwnd;
+
+    /// <summary>
+    /// 限制窗口能被拉到多大 / 多小。
+    ///
+    /// 为什么不用 OverlappedPresenter.PreferredMaximumWidth：
+    /// 实测它只对**用户拖拽边框**生效，程序化的 SetWindowPos 会绕过去。
+    /// 处理 WM_GETMINMAXINFO 才是 Win32 的正规做法 —— 拖拽、最大化、
+    /// SetWindowPos 全部都会走这里，一处生效。
+    ///
+    /// 窗口再宽也只是两侧留白（内容 MaxWidth 860），所以给上限比让它无限拉宽合理；
+    /// 下限防止把内容压扁。
+    /// </summary>
+    private void ApplySizeConstraints()
+    {
+        try
+        {
+            _windowHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (_windowHwnd == IntPtr.Zero || _originalWndProc != IntPtr.Zero) return;
+
+            IntPtr procPtr = Marshal.GetFunctionPointerForDelegate(_sizeWndProc);
+            _originalWndProc = SetWindowLongPtr(_windowHwnd, GWLP_WNDPROC, procPtr);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"ApplySizeConstraints FAILED {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private IntPtr SizeWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        if (msg == WM_GETMINMAXINFO)
+        {
+            uint dpi = GetDpiForWindow(hwnd);
+            double scale = dpi == 0 ? 1.0 : dpi / 96.0;
+
+            var info = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+            info.ptMinTrackSize.X = (int)Math.Round(MinLogicalWidth * scale);
+            info.ptMinTrackSize.Y = (int)Math.Round(MinLogicalHeight * scale);
+            info.ptMaxTrackSize.X = (int)Math.Round(MaxLogicalWidth * scale);
+            info.ptMaxTrackSize.Y = (int)Math.Round(MaxLogicalHeight * scale);
+            Marshal.StructureToPtr(info, lParam, false);
+        }
+        return CallWindowProc(_originalWndProc, hwnd, msg, wParam, lParam);
     }
 
     private void ApplyTitleBar()
