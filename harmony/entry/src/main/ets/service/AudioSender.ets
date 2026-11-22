@@ -49,6 +49,15 @@ export class AudioSender {
   private ringData: Uint8Array[] = [];
   private startedAt: number = 0;
   private running: boolean = false;
+  /**
+   * 是否在往 PC 推流。
+   *
+   * 采集和推流必须解耦：鸿蒙对 AUDIO_RECORDING 长时任务做「运行态一致性校验」，
+   * 声明了录音任务却没在录音，系统会取消任务并**冻结进程**。
+   * 所以 PC 断开时不能停采集，只能停推流 —— 否则 App 一进后台就被冻结，
+   * 重连回来起不来（表现为 PC 端 connected=True 但 fps=0）。
+   */
+  private sending: boolean = false;
   // 默认「原始」：零处理、零额外延迟，最少意外。
   private mode: MicMode = MicMode.Raw;
 
@@ -82,6 +91,36 @@ export class AudioSender {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /** 是否正在推流（区别于"是否在采集"）。 */
+  isSending(): boolean {
+    return this.sending;
+  }
+
+  /**
+   * 开始往指定 PC 推流。**不重建采集器** —— 采集在服务启动时就开着。
+   * 重连走这里，避免重建采集器的空窗，也不会把已串流时长接续错误。
+   */
+  attach(ip: string, port: number = AUDIO_PORT): void {
+    this.targetIp = ip;
+    this.targetPort = port;
+    this.tick = 0;
+    this.ringTicks = [];
+    this.ringData = [];
+    this.framesSent = 0;
+    this.bytesSent = 0;
+    this.startedAt = Date.now();
+    this.sending = true;
+    Logger.log('audio', `attach -> ${ip}:${port} (capturer kept alive)`);
+  }
+
+  /** 停止推流但**保持采集**，让长时任务持续有效。 */
+  detach(): void {
+    this.sending = false;
+    this.targetIp = '';
+    this.startedAt = 0;
+    Logger.log('audio', 'detach (capturer kept alive)');
   }
 
   uptimeMs(): number {
@@ -172,7 +211,15 @@ export class AudioSender {
     await new Promise<void>((resolve) => setTimeout(() => resolve(), 120));
   }
 
-  async start(ip: string, port: number = AUDIO_PORT): Promise<void> {
+  /**
+   * 启动采集（不推流）。服务启动时调用一次，之后靠 attach/detach 控制推流。
+   * 采集常开是长时任务保持有效的前提，见 sending 字段的注释。
+   */
+  async start(): Promise<void> {
+    await this.startInternal();
+  }
+
+  private async startInternal(ip: string = '', port: number = AUDIO_PORT): Promise<void> {
     await this.stop();
     // close() 是异步的，立刻重绑同一端口可能失败
     await new Promise<void>((resolve) => setTimeout(() => resolve(), 150));
@@ -291,7 +338,9 @@ export class AudioSender {
       this.ringTicks.shift();
       this.ringData.shift();
     }
-    this.sendUdp(streamData);
+    if (this.sending) {
+      this.sendUdp(streamData);
+    }
     if (this.framesSent % 100 === 0) {
       Logger.log('audio', `frames=${this.framesSent} sentOk=${this.sentOk} sendErr=${this.sendErr} -> ${this.targetIp}:${this.targetPort}`);
     }

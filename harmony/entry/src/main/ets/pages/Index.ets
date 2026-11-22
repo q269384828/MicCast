@@ -13,6 +13,21 @@ function pad2(value: number): string {
   return value < 10 ? `0${value}` : `${value}`;
 }
 
+/**
+ * 服务层提升到**模块级单例**，不再挂在页面 struct 里。
+ *
+ * 原因：页面销毁（Ability 重建、系统回收 UI）会把 struct 里的成员一起丢掉，
+ * 那时的表现就是"服务自己停了"。模块级变量的生命周期跟着 ES 模块/进程走，
+ * 页面来去都不影响正在跑的服务。
+ *
+ * 注意：这**不是**独立进程。鸿蒙的 ServiceExtensionAbility 是系统应用专用的，
+ * 三方应用用不了；而且拆进程也不能免于后台冻结 —— 冻结与否看的是有没有
+ * 合法的长时任务，不是看在哪个进程。
+ */
+const micServer: MicServer = new MicServer();
+const micSender: AudioSender = new AudioSender();
+const micGuard: BackgroundTaskGuard = new BackgroundTaskGuard();
+
 @Entry
 @Component
 struct Index {
@@ -32,9 +47,9 @@ struct Index {
   @State showGuide: boolean = true;
   @State micMode: MicMode = MicMode.Raw;
 
-  private server: MicServer = new MicServer();
-  private sender: AudioSender = new AudioSender();
-  private bgGuard: BackgroundTaskGuard = new BackgroundTaskGuard();
+  private server: MicServer = micServer;
+  private sender: AudioSender = micSender;
+  private bgGuard: BackgroundTaskGuard = micGuard;
   private timer: number = -1;
   private lastBytes: number = 0;
   private streamingIp: string = '';
@@ -72,7 +87,10 @@ struct Index {
       clearInterval(this.timer);
       this.timer = -1;
     }
-    this.stopAll();
+    // **不要在这里停服务。**
+    // aboutToDisappear 是页面销毁，不是用户点的「停止」。页面没了服务还得活着，
+    // 否则切后台/Ability 重建就把正在跑的麦克风一起带走了。
+    // 只有用户明确点「停止」才走 stopAll()。
   }
 
   private async stopAll(): Promise<void> {
@@ -94,20 +112,20 @@ struct Index {
     if (this.stopping) {
       return;
     }
-    await this.sender.stop();
-    // 故意不停长时任务：鸿蒙要求录音必须在前台启动，长时任务一停，
-    // 息屏/切后台后 App 会被冻结，PC 重连回来时 sender.start() 就起不来了
-    // （表现为 PC 端 connected=True 但 fps=0，一个音频包都收不到）。
-    // 代价是断开期间仍占着 audioRecording 长时任务，但用户随时可能重连，
-    // 保留上下文比反复重建更可靠。
+    // 只停推流，**保持采集**。
+    // 采集一停，「AUDIO_RECORDING 长时任务的运行态一致性校验」就过不了，
+    // 系统会取消长时任务并冻结进程；之后再重连 sender 起不来，
+    // 表现为 PC 端 connected=True 但 fps=0。所以断开期间采集必须继续。
+    this.sender.detach();
     this.streamingIp = '';
-    this.getUIContext().getPromptAction().showToast({ message: '电脑已断开，麦克风已停止' });
+    this.getUIContext().getPromptAction().showToast({ message: '电脑已断开，麦克风仍在待命' });
     this.refresh();
   }
 
   private refresh(): void {
     this.running = this.server.isListening();
-    this.streaming = this.sender.isRunning();
+    // streaming 表示"正在往 PC 推流"，不等于"在采集" —— 服务待命时采集是开着的
+    this.streaming = this.sender.isSending();
     this.clientIp = this.server.clientIp;
     if (this.server.localIp.length > 0) {
       this.localIp = this.server.localIp;
@@ -190,26 +208,39 @@ struct Index {
   }
 
   private async onPcConnected(ip: string): Promise<void> {
-    if (this.sender.isRunning() && this.streamingIp === ip) {
+    // 已经在给这台机器推流，什么都不用做
+    if (this.sender.isSending() && this.streamingIp === ip) {
       return;
     }
+
     const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    const granted: boolean = await this.ensureMicPermission();
-    if (!granted) {
-      this.getUIContext().getPromptAction().showToast({ message: '没有麦克风权限，无法把手机当麦克风用' });
-      return;
-    }
-    try {
-      await this.sender.setMode(this.micMode);
-      await this.sender.start(ip, AUDIO_PORT);
-      this.streamingIp = ip;
+
+    // 兜底：采集没在跑（例如用户是从托盘/别的路径连上来的）就补齐，
+    // 顺序仍是「先长时任务、再采集器」。
+    if (!this.sender.isRunning()) {
+      const granted: boolean = await this.ensureMicPermission();
+      if (!granted) {
+        this.getUIContext().getPromptAction().showToast({ message: '没有麦克风权限，无法把手机当麦克风用' });
+        return;
+      }
       await this.bgGuard.start(ctx);
-      this.getUIContext().getPromptAction().showToast({ message: `已连接电脑 ${ip}，开始串流` });
-      Logger.log('ui', `streaming mic to ${ip} (${micModeLabel(this.micMode)})`);
-    } catch (err) {
-      this.message = `启动麦克风失败：${err}`;
-      Logger.log('ui', this.message);
+      try {
+        await this.sender.setMode(this.micMode);
+        await this.sender.start();
+      } catch (err) {
+        this.message = `麦克风启动失败：${err}`;
+        Logger.log('ui', this.message);
+        await this.bgGuard.stop(ctx);
+        this.refresh();
+        return;
+      }
     }
+
+    // 采集已经在跑，只需要挂上推流目标 —— 不重建采集器，省掉空窗
+    this.sender.attach(ip, AUDIO_PORT);
+    this.streamingIp = ip;
+    this.getUIContext().getPromptAction().showToast({ message: `已连接电脑 ${ip}，开始串流` });
+    Logger.log('ui', `streaming mic to ${ip} (${micModeLabel(this.micMode)})`);
     this.refresh();
   }
 
@@ -245,6 +276,27 @@ struct Index {
       this.getUIContext().getPromptAction().showToast({
         message: this.server.lastError.length > 0 ? this.server.lastError : '启动失败'
       });
+      this.refresh();
+      return;
+    }
+
+    // 服务启动就**开始采集**（不是等 PC 连接）。
+    // 鸿蒙对 AUDIO_RECORDING 长时任务做运行态一致性校验：声明录音却不录音，
+    // 系统会取消长时任务并冻结进程。所以「服务开着」必须等于「正在录音」，
+    // 否则切后台就被冻结，PC 重连回来起不来（connected=True 但 fps=0）。
+    const ctx: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const granted: boolean = await this.ensureMicPermission();
+    if (granted) {
+      // 顺序按官方建议：先申请长时任务，再启动采集器
+      await this.bgGuard.start(ctx);
+      try {
+        await this.sender.setMode(this.micMode);
+        await this.sender.start();
+      } catch (err) {
+        this.message = `麦克风启动失败：${err}`;
+        Logger.log('ui', this.message);
+        await this.bgGuard.stop(ctx);
+      }
     }
     this.refresh();
   }

@@ -185,7 +185,6 @@ conn.on('close', () => {
 ```
 
 ## 6c. ArkUI 里 `width('100%')` 加 `margin` 不会收缩，会溢出被裁
-
 ```typescript
 Column() { /* 渐变 Hero */ }
   .width('100%')                                        // 宽度 = 父容器
@@ -208,7 +207,48 @@ Column() { /* 渐变 Hero */ }
 **自检方法**：同一屏里如果有的块用 `padding`、有的用 `margin`，一定要比对两者的左边缘是否对齐。
 这次 Hero 用 margin（错）+ 卡片用 padding（对），截图里 Hero 左边缘比卡片靠外约 50px，一眼能看出来。
 
-## 7. 往手机传文件：App 读不到 `/data/local/tmp``hdc file send` 到 `/data/local/tmp` 只有 shell 可读，媒体 App 拿不到内容（表现为能显示文件名，但 `totaltime` 恒为 `00:00`、点播放报「未找到文件」）。
+## 6d. 长时任务的「运行态一致性校验」—— 后台保活的核心约束
+
+官方文档明确：**系统会校验应用是否真在执行所声明的任务类型。声明了 `AUDIO_RECORDING`
+却没有真正在录音，系统会取消长时任务并冻结进程。**
+
+这一条直接决定架构，踩过两次**相反方向**的坑：
+
+| 做法 | 结果 |
+|---|---|
+| PC 断开 → 停采集 + **停**长时任务 | 切后台立刻被冻结，重连时 `sender.start()` 起不来 |
+| PC 断开 → 停采集 + **保留**长时任务 | 系统查出「声明录音却没录音」→ 取消任务 + 冻结。<br>表现同样是 `connected=True` 但 `fps=0` |
+| **PC 断开 → 只停推流，采集继续 + 保留长时任务** | 正确。任务始终合法，后台不被冻结，重连秒恢复 |
+
+**所以「麦克风服务开着」必须等价于「正在采集」，不能等价于「正在推流」。**
+`AudioSender` 因此拆成两层状态：
+
+- `start()` 启动采集（不推流）—— 服务启动时调用
+- `attach(ip)` 挂推流目标 / `detach()` 只停推流 —— 采集器始终不重建
+- `stop()` 全停 —— 只在用户点「停止」时调用
+
+日志里的正确行为：
+
+```
+[bg]    background long task started (audioRecording)   <- 先申请任务
+[audio] attach -> 192.168.3.105:59100 (capturer kept alive)
+[audio] detach (capturer kept alive)                     <- 断开，采集不停
+[audio] attach -> 192.168.3.105:59100 (capturer kept alive)  <- 重连
+```
+
+**另外：服务对象必须是模块级单例，不能挂在页面 struct 里。**
+`aboutToDisappear()` 是页面销毁（不是用户点停止），在里面 `stopAll()` 会把服务一起带走。
+现在 `micServer` / `micSender` / `micGuard` 都提在模块作用域，页面来去不影响服务。
+
+**关于「拆进程保活」—— 不行，别试：**
+
+- `ServiceExtensionAbility` 是**系统应用专属**，三方应用声明不了
+- `module.json5` 的 `process` 字段能让 Ability 跑在独立进程，但**冻结与否看的是有没有
+  合法长时任务，不是看在哪个进程**。拆出去照样冻
+- 唯一管用的保活机制就是「长时任务 + 业务与声明一致」
+
+## 7. 往手机传文件：App 读不到 `/data/local/tmp`
+
 
 要让播放器真正加载：
 
@@ -329,7 +369,9 @@ if (needed > _minTargetMs && needed <= _maxTargetMs) { _minTargetMs = needed; ..
 刚启动那几十秒的欠载会永远留在计数里。换算成 `ms/s`（5 秒滑动窗口）才有意义，
 稳态应该 < 2 —— 界面上显示的也是这个。
 
-## 8f. WinForms 自绘容器 + 常驻子控件是雷区给「手动 IP」做一个圆角输入框，试了 **8 种方案全部失败**：
+## 8f. WinForms 自绘容器 + 常驻子控件是雷区
+
+给「手动 IP」做一个圆角输入框，试了 **8 种方案全部失败**：
 
 | 方案 | 结果 |
 |---|---|
