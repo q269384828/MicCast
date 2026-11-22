@@ -118,11 +118,18 @@
         <Setter Property="Padding" Value="{StaticResource CardPadding}" />
     </Style>
 
-    <!-- 状态胶囊 -->
+    <!--
+        状态胶囊。
+        CornerRadius 不能写 999：WinUI 的 Border 不会把半径钳制到半高，
+        超过半高时四段圆弧互相重叠，画成杏仁形/纺锤形（实测就是这样）。
+        WinForms 的 GraphicsPath.AddArc 会自动收敛，所以从那边照搬 999 会出错。
+        正确做法：固定高度 + 半径 = 高度的一半。
+    -->
     <Style x:Key="PillStyle" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource PillIdleBgBrush}" />
-        <Setter Property="CornerRadius" Value="999" />
-        <Setter Property="Padding" Value="12,4" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="CornerRadius" Value="13" />
+        <Setter Property="Padding" Value="12,0" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 

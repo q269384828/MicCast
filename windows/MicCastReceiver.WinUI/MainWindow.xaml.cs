@@ -52,7 +52,12 @@ public sealed partial class MainWindow : Window
         UpdateState();
 
         // Rx 订阅：ObserveOn 保证回到 UI 线程，晚订阅也能拿到当前状态与历史日志
-        _logSubscription = _backend.LogStream.Subscribe(OnLog);
+        // 必须 ObserveOn 回 UI 线程：日志是由后台线程推过来的，
+        // 直接改 LogText.Text 会抛跨线程异常，表现为日志区一直是空的。
+        var logContext = new DispatcherQueueSynchronizationContext(DispatcherQueue);
+        _logSubscription = _backend.LogStream
+            .ObserveOn(logContext)
+            .Subscribe(OnLog);
         _stateSubscription = _backend.StateStream
             .Sample(TimeSpan.FromMilliseconds(60))
             .ObserveOn(new DispatcherQueueSynchronizationContext(DispatcherQueue))

@@ -61,7 +61,7 @@
 
 | token | 值 | 用途 |
 |---|---|---|
-| `radius-pill` | `999`（取一半高度的满圆） | 状态胶囊、徽章 |
+| `radius-pill` | **固定高度的一半**（26 高 → 13） | 状态胶囊、徽章 |
 | `radius-hero` | `22` | 顶部 Hero |
 | `radius-card` | `16` | 卡片、日志框 |
 | `radius-control` | `10` | 按钮、输入框、下拉框 |
@@ -197,7 +197,9 @@
 - 不用阴影（深浅色下阴影都不稳定）
 
 ### 状态胶囊
-- 圆角 `radius-pill`，文字 `font-label`，内边距 横向 `space-3` / 纵向 `space-1`
+- 高 **26**，圆角 **13**（= 高度一半），文字 `font-label`，内边距横向 `space-3`
+- **不要写 `CornerRadius="999"`**：WinUI 的 `Border` 不钳制半径，四段圆弧会重叠成
+  纺锤形；WinForms 的 `AddArc` 会自动收敛，所以从 WinForms 照搬 999 会画错
 - Hero 内版本用半透明白底（`#33FFFFFF`）+ `on-hero` 文字
 
 ### 主按钮

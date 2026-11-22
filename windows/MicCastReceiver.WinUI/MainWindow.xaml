@@ -17,7 +17,18 @@
                 Margin="16,0,0,0"
                 VerticalAlignment="Center"
                 Spacing="8">
-                <Image Source="ms-appx:///Assets/brand_mark.png" Width="16" Height="16" />
+                <!--
+                    品牌标记是白色线条图，直接放在浅色标题栏上会糊成一片。
+                    只在标题栏里给它加一个主色圆角底（Hero 里是白线压渐变，不需要底）。
+                -->
+                <Border
+                    Background="{ThemeResource AccentBrush}"
+                    CornerRadius="5"
+                    Width="22"
+                    Height="22"
+                    Padding="3">
+                    <Image Source="ms-appx:///Assets/brand_mark.png" Stretch="Uniform" />
+                </Border>
                 <TextBlock
                     Text="MicCast — 手机麦克风接收端"
                     FontSize="{StaticResource FontLabel}"
