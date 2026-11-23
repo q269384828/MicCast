@@ -23,13 +23,14 @@ MicCast/
 - 构建命令：
   - HarmonyOS：`cd harmony && ./hvigorw assembleHap`
   - WinForms：`cd windows/MicCastReceiver && dotnet build -c Release`
-  - **WinUI：必须用 VS 的 MSBuild**（见第 2b 节），`dotnet build` 会报 MSB4062
+  - WinUI：`cd windows/MicCastReceiver.WinUI && dotnet build -c Release -p:Platform=x64`
+  - 安装包：`.\tools\build-installer.ps1`（见第 2c 节）
 
 ## 1b. WinUI 3 的几个硬坑
 
 | 坑 | 现象 | 修法 |
 |---|---|---|
-| `dotnet build` | `MSB4062 未能加载 Microsoft.Build.Packaging.Pri.Tasks.dll` | 用 `C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe` |
+| `dotnet build` 报 `MSB4062 未能加载 Microsoft.Build.Packaging.Pri.Tasks.dll` | 少了 PRI 任务，且**产物没有 `.pri`**，程序启动即以 `0xc000027b` 崩 | 确保引用了 `Microsoft.Windows.SDK.BuildTools.MSIX` 这个 NuGet 包（已在 csproj 里）。它提供 PRI 任务，不必装 VS。删掉它就只能回退到 VS 的 MSBuild |
 | `AppWindow.Resize` | 窗口变大了但内容仍按旧尺寸排版，右侧一片空白 | 用 Win32 `SetWindowPos`（走正常 WM_SIZE 路径） |
 | `GetDpiForWindow` | 窗口渲染前返回 96，150% 缩放屏上 900 被当成物理像素 | 尺寸要在 `RootGrid.Loaded` 里算 |
 | `MaxWidth` + `HorizontalAlignment="Center"` | 按「内容自然宽度」测量，卡片反而被缩窄 | 外面套一层撑满的 `Grid`，内层再 MaxWidth + Center |
@@ -77,6 +78,24 @@ Move-Item 'build-profile.json5.bak' 'build-profile.json5' -Force
 ```
 
 **签名密码被 DevEco 用 `.ohos/config/material/` 里的密钥加密，命令行还原不出来。** 不要试图用 `keytool` 或 `hap-sign-tool` 猜密码，浪费时间。
+
+## 2b. 打包 Windows 安装程序
+
+```powershell
+# 前提：Inno Setup 6（winget install JRSoftware.InnoSetup）
+.\tools\build-installer.ps1                  # 版本默认 1.0.0
+.\tools\build-installer.ps1 -Version 1.0.1
+# 产物：dist\MicCast-Setup-<版本>-win-x64.exe
+```
+
+脚本做三件事：`dotnet publish` 自包含产物 → 校验 `.pri` 存在 → 调 `windows/installer/MicCast.iss` 打包。
+
+安装器约定（改 `MicCast.iss` 时别破坏）：
+
+- `PrivilegesRequired=lowest`，装到 `%LOCALAPPDATA%\Programs\MicCast`。程序把 `last-ip.txt` /
+  `winui-crash.log` 写在自身目录，装 Program Files 会因无权限静默失败
+- 必须把 `windows/Set-DefaultMic.ps1` 一起装进 `{app}` —— 托盘菜单从程序目录往上找这个脚本
+- VB-CABLE 不入包（第三方 donationware），首次运行由程序引导下载
 
 ## 3. 设备自动化：禁止硬编码坐标
 

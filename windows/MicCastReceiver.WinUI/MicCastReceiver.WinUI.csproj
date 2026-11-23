@@ -26,6 +26,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250606001" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.3916" />
+    <!--
+      提供 PRI 生成任务（MakePri/ExpandPriContent 等）。缺了它 resources.pri 不会生成，
+      启动时 WinUI 抛 0xc000027b 直接崩。有了这个包，dotnet build 就能出可用的产物，
+      不必再依赖 VS 的 MSBuild。
+    -->
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.MSIX" Version="1.7.261119100" />
     <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
   </ItemGroup>
 

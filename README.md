@@ -328,8 +328,11 @@ MicCast/
 # HarmonyOS
 cd harmony && ./hvigorw assembleHap
 
-# Windows
-cd windows/MicCastReceiver && dotnet build -c Release
+# Windows（WinUI 3 版，dotnet build 即可，不需要 Visual Studio）
+cd windows/MicCastReceiver.WinUI && dotnet build -c Release -p:Platform=x64
+
+# Windows 安装包 → dist/MicCast-Setup-<版本>-win-x64.exe
+./tools/build-installer.ps1
 ```
 
 ## 协议要点

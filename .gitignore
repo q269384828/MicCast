@@ -30,6 +30,9 @@ build*.log
 /windows/**/obj/
 /windows/**/last-ip.txt
 
+# 发布目录与安装包
+/dist/
+
 # VB-CABLE 驱动包属第三方软件，由程序运行时按需下载，不入库
 /windows/vbcable/
 

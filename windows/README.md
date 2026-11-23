@@ -203,18 +203,42 @@ windows/
 ### WinUI 3 版
 
 ```powershell
-# 必须用 VS 的 MSBuild —— dotnet build 缺 PRI 生成任务会报 MSB4062
-$msbuild = 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe'
 cd windows\MicCastReceiver.WinUI
-& $msbuild MicCastReceiver.WinUI.csproj /t:Restore /p:Platform=x64
-& $msbuild MicCastReceiver.WinUI.csproj /p:Configuration=Release /p:Platform=x64
+dotnet build -c Release -p:Platform=x64
 # 产物：bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\MicCastReceiver.exe
 ```
 
-需要 Visual Studio 2022（UWP 工作负载，提供 `Microsoft.Build.Packaging.Pri.Tasks.dll`）。
+PRI 生成任务由 NuGet 包 `Microsoft.Windows.SDK.BuildTools.MSIX` 提供，
+所以 **`dotnet build` 就够了，不再需要 Visual Studio**。
+
+> 早期版本依赖 VS 的 `Microsoft.Build.Packaging.Pri.Tasks.dll`，`dotnet build` 会报
+> `MSB4062`。现在少了这个包也不会报错，但**产不出应用自己的 `.pri`**，程序一启动就以
+> `0xc000027b` 崩溃（WinUI 资源查找失败）。所以别去掉那个 PackageReference。
 
 配置用 PowerToys Settings 同款：`WindowsPackageType=None` + `WindowsAppSDKSelfContained=true`
 ——不需要 MSIX 打包、不需要用户预装 Windows App SDK。
+
+### 打包成安装程序
+
+```powershell
+# 需要 Inno Setup 6：winget install JRSoftware.InnoSetup
+.\tools\build-installer.ps1                 # 默认版本 1.0.0
+.\tools\build-installer.ps1 -Version 1.0.1
+# 产物：dist\MicCast-Setup-<版本>-win-x64.exe
+```
+
+脚本会先 `dotnet publish` 出自包含产物（用户机器无需装 .NET），
+再校验 `.pri` 存在，最后用 Inno Setup 打成单个 setup.exe。
+
+安装器说明：
+
+- 装到 `%LOCALAPPDATA%\Programs\MicCast`，`PrivilegesRequired=lowest`，**不需要管理员权限**
+  ——程序会把 `last-ip.txt` / `winui-crash.log` 写在自身目录，放 Program Files 会因无权限静默失败
+- 随包附带 `Set-DefaultMic.ps1`，托盘菜单的「设为默认麦克风」才找得到脚本
+- 卸载时清掉 `HKCU\...\Run` 里的开机自启项
+- 语言：简体中文 / English
+
+VB-CABLE 虚拟声卡不在安装包内（第三方 donationware），首次运行由程序引导一键下载安装。
 
 ### WinForms 版（保留，可回退）
 
