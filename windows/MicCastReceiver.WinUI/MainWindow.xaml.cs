@@ -25,7 +25,6 @@ public sealed partial class MainWindow : Window
 
     private string _selectedIp = string.Empty;
     private bool _syncingServerBox;
-    private bool _syncingDeviceBox;
     private bool _installing;
     private bool _loaded;
     private IDisposable? _stateSubscription;
@@ -453,7 +452,6 @@ public sealed partial class MainWindow : Window
     private void LoadDevices()
     {
         var devices = _backend.GetDevices();
-        _syncingDeviceBox = true;
         DeviceBox.Items.Clear();
         foreach (var d in devices) DeviceBox.Items.Add($"[{d.Index}] {d.Name}");
 
@@ -467,7 +465,6 @@ public sealed partial class MainWindow : Window
             }
         }
         DeviceBox.SelectedIndex = devices.Count > 0 ? (preferred >= 0 ? preferred : 0) : -1;
-        _syncingDeviceBox = false;
     }
 
     private void RefreshServerList()
