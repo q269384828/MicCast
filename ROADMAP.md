@@ -287,6 +287,47 @@ WebRTC 的 NetEq 用 WSOLA 做**时间伸缩**，变速但不变调：
 - 需要帧间相似度搜索，CPU 开销比现在高一个量级
 - 语音场景收益不大，先记着
 
+### 6c. USB 连接支持（调研结论，未实现）
+
+**动机**：无线下遇到「手机和电脑不在同一网段就完全用不了」的问题。
+实测过一次：电脑 `172.18.70.30/23`、手机 `172.18.66.50`，跨网段 ping 不通、
+`172.18.66.0/24` 整段 0 存活，协议无中继/无 NAT 穿透，直接连不上。
+
+**三条 USB 路线，只有一条可行：**
+
+| 方案 | 可行性 | 原因 |
+|---|---|---|
+| **① USB 网络共享（RNDIS）** | ✅ **唯一可行** | 两端拿到同网段 IP，现有协议零改动 |
+| ② hdc 端口转发（fport/rport） | ❌ | **只支持 `tcp:`，没有 UDP 转发**；音频走 UDP 59100、发现走 UDP 59200，转发不了。且 DevEco 4.1+ 部分版本已移除 `fport` |
+| ③ 手机当 USB 音频设备（UAC Gadget） | ❌ | 需要手机侧实现 USB Audio Class 设备模式（电脑免驱识别成声卡），鸿蒙未向三方应用开放 Gadget UAC 能力，应用层无法实现 |
+
+**方案 ① 为什么零改动**（四处绑定都已是 `0.0.0.0`，任何网卡进来都能用）：
+
+| 位置 | 现状 |
+|---|---|
+| `MicServer.ets` `server.listen({ address: '0.0.0.0', port: 59100 })` | 任何网卡可连 |
+| `AudioSender.ets` `candidate.bind({ address: '0.0.0.0', port: 59100 })` | 可从 RNDIS 网卡发出 |
+| `Receiver.cs` `Bind(IPAddress.Any, Protocol.AudioPort)` | 收所有网卡 |
+| `Discovery.cs` `Bind(IPEndPoint(IPAddress.Any, Protocol.DiscoveryPort))` | 收所有网卡 |
+
+手机开「设置 → 网络 → 个人热点 → USB 网络共享」后，手机通常是 `192.168.50.1`（或
+`192.168.42.1`），电脑自动拿到 `192.168.50.x`，两端同处一个二层网络。
+
+**待验证/待修的三点：**
+
+1. **防火墙 profile 缺口（真实缺陷，与 USB 无关也该修）**
+   现有 `MicCastReceiver` 入站规则只覆盖 `Domain, Public` 两个 profile。
+   若 USB 网卡被 Windows 判为**「专用网络」**，规则不生效，PC 端收不到音频。
+   应改为覆盖全部 profile，并在安装器里显式建规则。
+2. **发现可能仍需手填 IP**
+   `255.255.255.255` 全局广播未必能跨出 RNDIS 网卡。失败时手动填 `192.168.50.1` 即可，
+   现有 UI 与 `--ip` 参数都支持，不必为此改代码。
+3. **USB 顺带的收益**：链路延迟更低、带宽稳定（480 Mbps）、手机边用边充电，
+   现在的抖动/欠载问题会明显缓解。
+
+**结论**：先做零代码实测（插线开 USB 共享 → `--discover` + `--ip 192.168.50.1`），
+通过则只需补防火墙规则；不需要改协议、不需要改鸿蒙端。
+
 ### 7. PC → 手机回传（双向对讲）
 
 协议里有双向通道。做出来后手机插耳机就能同时听电脑声音，变成完整耳麦。
@@ -325,10 +366,19 @@ lint:           dotnet format + arktslint
 - 覆盖：`ProtoServerConfig`、`ProtoClientConfig`、`ProtoFeatures`、`StreamData`、`PingRequest/Response`
 - 这些函数都是纯函数，好测
 
-### 11. 打包分发
+### 11. ~~打包分发~~ ✅ Windows 已完成
 
-- **Windows**：`--self-contained` 单文件版（免装 .NET 运行时，约 60MB）+ MSI 安装包
-- **鸿蒙**：打 release HAP，或走 AGC 分发
+- **Windows**：✅ 已完成。`tools/build-installer.ps1` → `dist/MicCast-Setup-<版本>-win-x64.exe`
+  - 自包含发布（免装 .NET 运行时），lzma2 压缩后约 55 MB
+  - Inno Setup，`PrivilegesRequired=lowest` 装到 `%LOCALAPPDATA%\Programs\MicCast`
+    （程序把 `last-ip.txt` / `winui-crash.log` 写在自身目录，装 Program Files 会静默失败）
+  - 随包附带 `Set-DefaultMic.ps1`；卸载清 `HKCU\...\Run` 自启项；中英双语
+  - **顺带修掉的构建缺陷**：原来 WinUI 版必须用 VS 的 MSBuild（`dotnet build` 报
+    `MSB4062`）。改用 NuGet 包 `Microsoft.Windows.SDK.BuildTools.MSIX` 提供 PRI 任务后，
+    `dotnet build` 即可产出可运行的 `.pri`，不再依赖 Visual Studio。
+    注意：缺这个包不会报错，但产不出应用自己的 `.pri`，程序启动即以 `0xc000027b` 崩溃。
+  - 待办：防火墙规则改为覆盖全部 profile（见 6c）
+- **鸿蒙**：待做，打 release HAP 或走 AGC 分发
 
 ### 12. 自动化测试
 
@@ -358,4 +408,10 @@ lint:           dotnet format + arktslint
 **当前可用形态：** 开机自启 → 托盘图标常驻 → 手机点「启动麦克风服务」后自动连上，
 全程不用打开主窗口。右键托盘可随时停止/恢复接收或彻底退出。
 
-剩下的（音频处理链、Opus）都是锦上添花。
+Windows 端已有安装包（`tools/build-installer.ps1`），可直接分发。
+
+**已知最大障碍是网络**：手机和电脑必须处于同一网段。实测跨网段（`172.18.70.x` ↔ `172.18.66.x`）
+完全不通，而协议无中继/无 NAT 穿透。**USB 网络共享是当前最省事的解法**，
+调研结论见 6c —— 只需补一条防火墙规则，协议与鸿蒙端都不用改。
+
+剩下的（音频处理链、Opus、USB 实测）都是锦上添花。
