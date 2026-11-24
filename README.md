@@ -322,7 +322,7 @@ MicCast/
 └── LICENSE
 ```
 
-**构建方式：**
+**构建与运行：**
 
 ```bash
 # HarmonyOS
@@ -333,6 +333,14 @@ cd windows/MicCastReceiver.WinUI && dotnet build -c Release -p:Platform=x64
 
 # Windows 安装包 → dist/MicCast-Setup-<版本>-win-x64.exe
 ./tools/build-installer.ps1
+```
+
+日常启动直接双击仓库根目录的 **`run.cmd`**（增量编译 + 启动），带参数则透传给程序：
+
+```powershell
+.\run.cmd            # 编译并打开窗口
+.\run.cmd --status   # 查运行状态
+.\run.cmd --discover # 扫局域网里的手机
 ```
 
 ## 协议要点

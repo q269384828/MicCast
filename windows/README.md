@@ -202,11 +202,18 @@ windows/
 
 ### WinUI 3 版
 
+**最简单的启动方式：双击仓库根目录的 `run.cmd`**（增量编译 + 启动窗口），
+带参数则透传给程序，例如 `run.cmd --status`。桌面和开始菜单里也放了 `MicCast` 快捷方式。
+
+手动构建：
+
 ```powershell
 cd windows\MicCastReceiver.WinUI
 dotnet build -c Release -p:Platform=x64
 # 产物：bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\MicCastReceiver.exe
 ```
+
+产物路径是固定的，`run.cmd` 就是在跑上面这条命令再启动那个 exe。
 
 PRI 生成任务由 NuGet 包 `Microsoft.Windows.SDK.BuildTools.MSIX` 提供，
 所以 **`dotnet build` 就够了，不再需要 Visual Studio**。

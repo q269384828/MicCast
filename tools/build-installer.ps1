@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     构建 MicCast Windows 接收端并打包成安装程序（setup.exe）。
 .DESCRIPTION

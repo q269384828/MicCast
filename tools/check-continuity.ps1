@@ -1,4 +1,4 @@
-# 录制 CABLE Output 若干秒，逐 5ms 帧扫描全零采样，报告最长断流。
+﻿# 录制 CABLE Output 若干秒，逐 5ms 帧扫描全零采样，报告最长断流。
 # 用途：验证 MicCast 送进声卡的 PCM 是否连续（Win+H / 会议软件对空洞很敏感）。
 #
 #   pwsh tools/check-continuity.ps1 -Seconds 5

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     构建（含签名）→ 安装到手机 → 启动 → 抓日志。
 .DESCRIPTION

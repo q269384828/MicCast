@@ -25,6 +25,11 @@ MicCast/
   - WinForms：`cd windows/MicCastReceiver && dotnet build -c Release`
   - WinUI：`cd windows/MicCastReceiver.WinUI && dotnet build -c Release -p:Platform=x64`
   - 安装包：`.\tools\build-installer.ps1`（见第 2c 节）
+- **要启动/调试就用 `.\run.cmd`**（= `tools/run.ps1`：增量构建 + 启动），别手动 cd 进
+  `bin\x64\Release\net9.0-windows10.0.19041.0\win-x64\` 找 exe。带参数会透传给程序。
+  产物路径是固定的；`run.ps1` 里 `$outDir` 是唯一事实来源，改 TFM 时同步改它
+- ps1 里写中文必须存成 **UTF-8 带 BOM**，否则 Windows PowerShell 5.1 按 ANSI 读会乱码，
+  报 `Missing closing '}'` 之类看起来无关的语法错
 
 ## 1b. WinUI 3 的几个硬坑
 

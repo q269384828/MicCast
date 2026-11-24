@@ -1,4 +1,4 @@
-# 从指定录音设备录制一段 16kHz/16bit/mono PCM，存成标准 WAV。
+﻿# 从指定录音设备录制一段 16kHz/16bit/mono PCM，存成标准 WAV。
 # 用于对比 MicCast 三档采集模式的实际听感。
 #
 #   pwsh tools/record-cable.ps1 -Seconds 8 -OutFile C:\temp\raw.wav
